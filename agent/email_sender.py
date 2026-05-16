@@ -76,80 +76,60 @@ def send_report_email(to_email: str, client_name: str, report: dict):
         <style>
             body {{
                 font-family: Arial, sans-serif;
-                background: #f5f5f5;
+                background: #ffffff;
                 color: #1a1a1a;
                 margin: 0;
-                padding: 20px 10px;
-                font-size: 15px;
+                padding: 0;
+                font-size: 13px;
+                line-height: 1.6;
             }}
             .container {{
                 max-width: 600px;
                 margin: 0 auto;
                 background: #ffffff;
-                border: 1px solid #e0e0e0;
-                border-radius: 6px;
-                overflow: hidden;
             }}
             .header {{
-                background: #ffffff;
-                border-bottom: 2px solid #6366f1;
-                padding: 28px 30px 20px;
+                padding: 25px 25px 20px;
+                border-bottom: 1px solid #eeeeee;
             }}
-            .header-top {{
-                display: flex;
-                align-items: center;
-                gap: 12px;
-                margin-bottom: 14px;
-            }}
-            .logo-badge {{
-                background: #6366f1;
-                color: #ffffff;
-                font-size: 14px;
-                font-weight: 700;
-                padding: 6px 12px;
-                border-radius: 4px;
-                letter-spacing: 0.5px;
-            }}
-            .header-title {{
+            .header-name {{
                 font-size: 18px;
                 font-weight: 700;
                 color: #1a1a1a;
-                margin: 0;
+                margin: 0 0 4px;
             }}
-            .header-sub {{
+            .header-date {{
                 font-size: 13px;
-                color: #6b7280;
-                margin: 4px 0 0;
+                color: #666666;
+                margin: 0 0 14px;
             }}
-            .sentiment-bar {{
-                display: inline-block;
-                background: #f3f4f6;
-                border: 1px solid #e5e7eb;
-                border-left: 4px solid {sentiment_color};
-                border-radius: 4px;
-                padding: 8px 14px;
-                margin-top: 14px;
-                font-size: 14px;
+            .header-greeting {{
+                font-size: 13px;
                 color: #1a1a1a;
+                margin: 0 0 14px;
             }}
-            .sentiment-score {{
+            .sentiment-badge {{
+                display: inline-block;
+                background: {sentiment_color};
+                color: #ffffff;
+                font-size: 12px;
                 font-weight: 700;
-                color: {sentiment_color};
+                padding: 3px 10px;
+                border-radius: 3px;
             }}
             .content {{
-                padding: 28px 30px;
+                padding: 25px;
             }}
             .report-body {{
-                font-size: 15px;
-                line-height: 1.7;
+                font-size: 13px;
+                line-height: 1.6;
                 color: #1a1a1a;
-                font-weight: 400;
             }}
             .report-body h3 {{
-                font-size: 16px;
+                font-size: 14px;
                 font-weight: 700;
                 color: #1a1a1a;
-                margin: 24px 0 8px;
+                margin: 22px 0 6px;
                 padding-bottom: 6px;
                 border-bottom: 1px solid #eeeeee;
             }}
@@ -157,16 +137,13 @@ def send_report_email(to_email: str, client_name: str, report: dict):
                 margin-top: 0;
             }}
             .report-body p {{
-                margin: 0 0 12px;
+                margin: 0 0 10px;
                 color: #1a1a1a;
-                font-weight: 400;
             }}
             .footer {{
                 border-top: 1px solid #eeeeee;
-                background: #f9f9f9;
-                text-align: center;
-                padding: 16px 20px;
-                color: #9ca3af;
+                padding: 16px 25px;
+                color: #999999;
                 font-size: 12px;
                 line-height: 1.5;
             }}
@@ -175,18 +152,10 @@ def send_report_email(to_email: str, client_name: str, report: dict):
     <body>
         <div class="container">
             <div class="header">
-                <div class="header-top">
-                    <span class="logo-badge">FinanceAI</span>
-                    <div>
-                        <p class="header-title">Rapport du matin — {today}</p>
-                        <p class="header-sub">Bonjour {client_name}, voici votre analyse financière du jour.</p>
-                    </div>
-                </div>
-                <div class="sentiment-bar">
-                    Sentiment du marché :&nbsp;
-                    <span class="sentiment-score">{sentiment}/100</span>
-                    &nbsp;— {sentiment_label}
-                </div>
+                <p class="header-name">FinanceAI</p>
+                <p class="header-date">Rapport du {today}</p>
+                <p class="header-greeting">Bonjour {client_name},</p>
+                <span class="sentiment-badge">{sentiment_label} — {sentiment}/100</span>
             </div>
             <div class="content">
                 <div class="report-body">
@@ -194,8 +163,8 @@ def send_report_email(to_email: str, client_name: str, report: dict):
                 </div>
             </div>
             <div class="footer">
-                <p>FinanceAI — Conseiller financier IA personnel</p>
-                <p>Ce rapport est généré automatiquement. Il est fourni à titre informatif uniquement et ne constitue pas un conseil en investissement.</p>
+                <p style="margin:0 0 4px">FinanceAI — Conseiller financier IA personnel</p>
+                <p style="margin:0">Ce rapport est fourni à titre informatif uniquement et ne constitue pas un conseil en investissement.</p>
             </div>
         </div>
     </body>
