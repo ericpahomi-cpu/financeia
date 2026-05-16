@@ -75,74 +75,98 @@ def send_report_email(to_email: str, client_name: str, report: dict):
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
             body {{
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
-                background: #0a0a0f;
-                color: #e2e8f0;
+                font-family: Arial, sans-serif;
+                background: #f5f5f5;
+                color: #1a1a1a;
                 margin: 0;
-                padding: 20px;
+                padding: 20px 10px;
                 font-size: 15px;
             }}
             .container {{
-                max-width: 650px;
+                max-width: 600px;
                 margin: 0 auto;
+                background: #ffffff;
+                border: 1px solid #e0e0e0;
+                border-radius: 6px;
+                overflow: hidden;
             }}
             .header {{
-                background: linear-gradient(135deg, #6366f1, #8b5cf6);
-                padding: 30px;
-                border-radius: 12px 12px 0 0;
-                text-align: center;
+                background: #ffffff;
+                border-bottom: 2px solid #6366f1;
+                padding: 28px 30px 20px;
             }}
-            .header h1 {{
-                color: white;
-                margin: 0;
-                font-size: 24px;
-                font-weight: 700;
+            .header-top {{
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                margin-bottom: 14px;
             }}
-            .header p {{
-                color: rgba(255,255,255,0.85);
-                margin: 8px 0 0;
+            .logo-badge {{
+                background: #6366f1;
+                color: #ffffff;
                 font-size: 14px;
+                font-weight: 700;
+                padding: 6px 12px;
+                border-radius: 4px;
+                letter-spacing: 0.5px;
             }}
-            .sentiment-badge {{
+            .header-title {{
+                font-size: 18px;
+                font-weight: 700;
+                color: #1a1a1a;
+                margin: 0;
+            }}
+            .header-sub {{
+                font-size: 13px;
+                color: #6b7280;
+                margin: 4px 0 0;
+            }}
+            .sentiment-bar {{
                 display: inline-block;
-                background: {sentiment_color};
-                color: white;
-                padding: 7px 18px;
-                border-radius: 20px;
-                font-weight: 600;
-                font-size: 15px;
-                margin: 15px 0 0;
+                background: #f3f4f6;
+                border: 1px solid #e5e7eb;
+                border-left: 4px solid {sentiment_color};
+                border-radius: 4px;
+                padding: 8px 14px;
+                margin-top: 14px;
+                font-size: 14px;
+                color: #1a1a1a;
+            }}
+            .sentiment-score {{
+                font-weight: 700;
+                color: {sentiment_color};
             }}
             .content {{
-                background: #1a1a2e;
-                padding: 28px 32px;
-                border-radius: 0 0 12px 12px;
+                padding: 28px 30px;
             }}
             .report-body {{
                 font-size: 15px;
-                line-height: 1.6;
+                line-height: 1.7;
+                color: #1a1a1a;
                 font-weight: 400;
             }}
             .report-body h3 {{
                 font-size: 16px;
-                font-weight: 600;
-                color: #a5b4fc;
+                font-weight: 700;
+                color: #1a1a1a;
                 margin: 24px 0 8px;
                 padding-bottom: 6px;
-                border-bottom: 1px solid #2a2a4a;
+                border-bottom: 1px solid #eeeeee;
             }}
             .report-body h3:first-child {{
                 margin-top: 0;
             }}
             .report-body p {{
                 margin: 0 0 12px;
-                color: #cbd5e1;
+                color: #1a1a1a;
                 font-weight: 400;
             }}
             .footer {{
+                border-top: 1px solid #eeeeee;
+                background: #f9f9f9;
                 text-align: center;
-                padding: 20px;
-                color: #64748b;
+                padding: 16px 20px;
+                color: #9ca3af;
                 font-size: 12px;
                 line-height: 1.5;
             }}
@@ -151,10 +175,17 @@ def send_report_email(to_email: str, client_name: str, report: dict):
     <body>
         <div class="container">
             <div class="header">
-                <h1>📈 FinanceAI — Rapport du matin</h1>
-                <p>Bonjour {client_name} — Voici votre analyse financière du {today}</p>
-                <div class="sentiment-badge">
-                    Sentiment du marché : {sentiment}/100 {sentiment_label}
+                <div class="header-top">
+                    <span class="logo-badge">FinanceAI</span>
+                    <div>
+                        <p class="header-title">Rapport du matin — {today}</p>
+                        <p class="header-sub">Bonjour {client_name}, voici votre analyse financière du jour.</p>
+                    </div>
+                </div>
+                <div class="sentiment-bar">
+                    Sentiment du marché :&nbsp;
+                    <span class="sentiment-score">{sentiment}/100</span>
+                    &nbsp;— {sentiment_label}
                 </div>
             </div>
             <div class="content">
@@ -163,8 +194,8 @@ def send_report_email(to_email: str, client_name: str, report: dict):
                 </div>
             </div>
             <div class="footer">
-                <p>FinanceAI — Votre conseiller financier IA personnel</p>
-                <p>Ce rapport est généré automatiquement à des fins informationnelles uniquement.</p>
+                <p>FinanceAI — Conseiller financier IA personnel</p>
+                <p>Ce rapport est généré automatiquement. Il est fourni à titre informatif uniquement et ne constitue pas un conseil en investissement.</p>
             </div>
         </div>
     </body>

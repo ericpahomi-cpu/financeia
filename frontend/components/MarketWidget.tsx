@@ -32,31 +32,31 @@ export default function MarketWidget({ data }: MarketWidgetProps) {
 
   if (!items.length) {
     return (
-      <div className="bg-[#1a1a2e] border border-[#2a2a4a] rounded-xl p-4">
-        <p className="text-slate-500 text-sm text-center">Chargement des données marché...</p>
+      <div className="bg-white border border-[#e5e7eb] rounded-xl p-4 shadow-sm">
+        <p className="text-[#9ca3af] text-sm text-center">Chargement des données marché...</p>
       </div>
     );
   }
 
   return (
-    <div className="bg-[#1a1a2e] border border-[#2a2a4a] rounded-xl p-4">
-      <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
+    <div className="bg-white border border-[#e5e7eb] rounded-xl p-4 shadow-sm">
+      <h3 className="text-[#1a1a1a] font-semibold mb-3 flex items-center gap-2">
         <span>🌍</span> Marchés en temps réel
       </h3>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
         {items.map(([symbol, item]) => (
           <div
             key={symbol}
-            className="bg-[#0a0a0f] rounded-lg p-3 border border-[#2a2a4a] hover:border-indigo-500/50 transition-colors"
+            className="bg-[#f8f9fa] rounded-lg p-3 border border-[#e5e7eb] hover:border-indigo-300 transition-colors"
           >
-            <p className="text-slate-400 text-xs truncate">
+            <p className="text-[#6b7280] text-xs truncate">
               {SYMBOL_LABELS[symbol] || symbol}
             </p>
-            <p className="text-white font-bold text-sm mt-1">
+            <p className="text-[#1a1a1a] font-bold text-sm mt-1">
               ${item.price?.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
             <p className={`text-xs font-medium mt-0.5 ${
-              item.direction === 'up' ? 'text-emerald-400' : 'text-red-400'
+              item.direction === 'up' ? 'text-emerald-600' : 'text-red-500'
             }`}>
               {item.direction === 'up' ? '▲' : '▼'} {Math.abs(item.change_pct).toFixed(2)}%
             </p>

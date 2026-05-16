@@ -16,14 +16,14 @@ export default function Sidebar() {
   return (
     <>
       {/* Sidebar desktop */}
-      <aside className="hidden md:flex flex-col w-64 bg-[#1a1a2e] border-r border-[#2a2a4a] min-h-screen p-4">
+      <aside className="hidden md:flex flex-col w-64 bg-white border-r border-[#e5e7eb] min-h-screen p-4">
         <div className="flex items-center gap-3 mb-8 px-2">
           <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-bold text-lg">
             FA
           </div>
           <div>
-            <h1 className="text-white font-bold text-lg leading-none">FinanceAI</h1>
-            <p className="text-indigo-400 text-xs">Conseiller IA</p>
+            <h1 className="text-[#1a1a1a] font-bold text-lg leading-none">FinanceAI</h1>
+            <p className="text-indigo-500 text-xs">Conseiller IA</p>
           </div>
         </div>
 
@@ -37,7 +37,7 @@ export default function Sidebar() {
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 ${
                   isActive
                     ? 'bg-indigo-600 text-white'
-                    : 'text-slate-400 hover:bg-[#2a2a4a] hover:text-white'
+                    : 'text-[#6b7280] hover:bg-[#f3f4f6] hover:text-[#1a1a1a]'
                 }`}
               >
                 <span className="text-lg">{item.icon}</span>
@@ -47,16 +47,16 @@ export default function Sidebar() {
           })}
         </nav>
 
-        <div className="border-t border-[#2a2a4a] pt-4 mt-4">
+        <div className="border-t border-[#e5e7eb] pt-4 mt-4">
           <div className="px-3 py-2">
-            <p className="text-slate-500 text-xs">FinanceAI v1.0</p>
-            <p className="text-slate-600 text-xs">Powered by Claude AI</p>
+            <p className="text-[#9ca3af] text-xs">FinanceAI v1.0</p>
+            <p className="text-[#d1d5db] text-xs">Powered by Claude AI</p>
           </div>
         </div>
       </aside>
 
       {/* Bottom nav mobile */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-[#1a1a2e] border-t border-[#2a2a4a] z-50">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-[#e5e7eb] z-50">
         <div className="flex items-center justify-around py-2">
           {navItems.map((item) => {
             const isActive = pathname === item.href;
@@ -65,7 +65,7 @@ export default function Sidebar() {
                 key={item.href}
                 href={item.href}
                 className={`flex flex-col items-center gap-1 px-3 py-1 rounded-lg ${
-                  isActive ? 'text-indigo-400' : 'text-slate-500'
+                  isActive ? 'text-indigo-600' : 'text-[#9ca3af]'
                 }`}
               >
                 <span className="text-xl">{item.icon}</span>

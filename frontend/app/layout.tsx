@@ -20,7 +20,7 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
       </head>
-      <body className="antialiased bg-[#0a0a0f] text-slate-200">
+      <body className="antialiased bg-[#f8f9fa] text-[#1a1a1a]">
         {children}
       </body>
     </html>

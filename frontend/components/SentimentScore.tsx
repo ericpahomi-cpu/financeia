@@ -6,12 +6,12 @@ interface SentimentScoreProps {
 
 export default function SentimentScore({ score }: SentimentScoreProps) {
   const getColor = (s: number) => {
-    if (s >= 65) return { stroke: '#10b981', text: 'Positif', bg: 'text-emerald-400' };
-    if (s >= 40) return { stroke: '#f59e0b', text: 'Neutre', bg: 'text-amber-400' };
-    return { stroke: '#ef4444', text: 'Prudence', bg: 'text-red-400' };
+    if (s >= 65) return { stroke: '#10b981', text: 'Positif', textClass: 'text-emerald-600' };
+    if (s >= 40) return { stroke: '#f59e0b', text: 'Neutre', textClass: 'text-amber-500' };
+    return { stroke: '#ef4444', text: 'Prudence', textClass: 'text-red-500' };
   };
 
-  const { stroke, text, bg } = getColor(score);
+  const { stroke, text, textClass } = getColor(score);
   const circumference = 2 * Math.PI * 54;
   const offset = circumference - (score / 100) * circumference;
 
@@ -23,7 +23,7 @@ export default function SentimentScore({ score }: SentimentScoreProps) {
           <circle
             cx="60" cy="60" r="54"
             fill="none"
-            stroke="#2a2a4a"
+            stroke="#e5e7eb"
             strokeWidth="10"
           />
           {/* Progress */}
@@ -39,15 +39,17 @@ export default function SentimentScore({ score }: SentimentScoreProps) {
           />
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className={`text-3xl font-bold ${bg}`}>{score}</span>
-          <span className="text-slate-400 text-xs">/100</span>
+          <span className={`text-3xl font-bold ${textClass}`}>{score}</span>
+          <span className="text-[#9ca3af] text-xs">/100</span>
         </div>
       </div>
-      <div className={`mt-2 px-3 py-1 rounded-full text-sm font-semibold ${bg} bg-opacity-10`}
-           style={{ backgroundColor: `${stroke}20` }}>
-        <span style={{ color: stroke }}>{text}</span>
+      <div
+        className="mt-2 px-3 py-1 rounded-full text-sm font-semibold"
+        style={{ backgroundColor: `${stroke}18`, color: stroke }}
+      >
+        {text}
       </div>
-      <p className="text-slate-500 text-xs mt-1">Sentiment du marché</p>
+      <p className="text-[#6b7280] text-xs mt-1">Sentiment du marché</p>
     </div>
   );
 }

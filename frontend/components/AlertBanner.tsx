@@ -20,16 +20,16 @@ export default function AlertBanner({ alerts }: AlertBannerProps) {
       {alerts.slice(0, 3).map((alert) => (
         <div
           key={alert.id}
-          className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/30 rounded-lg px-4 py-3"
+          className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3"
         >
-          <span className="text-amber-400 text-lg flex-shrink-0">⚠️</span>
+          <span className="text-amber-500 text-lg flex-shrink-0">⚠️</span>
           <div className="flex-1 min-w-0">
-            <p className="text-amber-200 text-sm font-medium">{alert.message}</p>
-            <p className="text-amber-400/60 text-xs">
+            <p className="text-amber-800 text-sm font-medium">{alert.message}</p>
+            <p className="text-amber-500 text-xs">
               {new Date(alert.triggered_at).toLocaleTimeString('fr-FR')}
             </p>
           </div>
-          <span className="text-amber-400/60 text-xs font-mono flex-shrink-0">
+          <span className="text-amber-500 text-xs font-mono flex-shrink-0">
             {alert.asset}
           </span>
         </div>

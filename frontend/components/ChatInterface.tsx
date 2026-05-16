@@ -36,7 +36,6 @@ export default function ChatInterface() {
     setMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
     setIsLoading(true);
 
-    // Prépare l'historique (sans le message système initial)
     const history = messages.slice(1).map((m) => ({
       role: m.role,
       content: m.content,
@@ -125,7 +124,7 @@ export default function ChatInterface() {
               className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                 message.role === 'user'
                   ? 'bg-indigo-600 text-white rounded-tr-sm'
-                  : 'bg-[#1a1a2e] border border-[#2a2a4a] text-slate-200 rounded-tl-sm'
+                  : 'bg-white border border-[#e5e7eb] text-[#1a1a1a] rounded-tl-sm shadow-sm'
               }`}
             >
               {message.content || (
@@ -137,7 +136,7 @@ export default function ChatInterface() {
               )}
             </div>
             {message.role === 'user' && (
-              <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 ml-2 mt-1">
+              <div className="w-8 h-8 rounded-full bg-[#e5e7eb] flex items-center justify-center text-[#6b7280] text-xs font-bold flex-shrink-0 ml-2 mt-1">
                 Vous
               </div>
             )}
@@ -147,7 +146,7 @@ export default function ChatInterface() {
       </div>
 
       {/* Input */}
-      <div className="border-t border-[#2a2a4a] p-4">
+      <div className="border-t border-[#e5e7eb] p-4 bg-white">
         <form onSubmit={handleSubmit} className="flex gap-3">
           <textarea
             ref={textareaRef}
@@ -156,7 +155,7 @@ export default function ChatInterface() {
             onKeyDown={handleKeyDown}
             placeholder="Posez votre question financière... (Entrée pour envoyer)"
             rows={2}
-            className="flex-1 bg-[#0a0a0f] border border-[#2a2a4a] rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 resize-none transition-colors"
+            className="flex-1 bg-[#f8f9fa] border border-[#e5e7eb] rounded-xl px-4 py-3 text-sm text-[#1a1a1a] placeholder-[#9ca3af] focus:outline-none focus:border-indigo-400 resize-none transition-colors"
             disabled={isLoading}
           />
           <button
@@ -167,7 +166,7 @@ export default function ChatInterface() {
             {isLoading ? '...' : '→'}
           </button>
         </form>
-        <p className="text-slate-600 text-xs mt-2 text-center">
+        <p className="text-[#9ca3af] text-xs mt-2 text-center">
           FinanceAI fournit des informations générales, pas des conseils d&apos;investissement.
         </p>
       </div>

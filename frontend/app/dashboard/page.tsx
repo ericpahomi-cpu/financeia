@@ -39,7 +39,6 @@ export default function DashboardPage() {
 
   useEffect(() => {
     fetchData();
-    // Rafraîchit les données toutes les 5 minutes
     const interval = setInterval(fetchData, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
@@ -77,8 +76,8 @@ export default function DashboardPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Dashboard</h1>
-          <p className="text-slate-400 text-sm">
+          <h1 className="text-2xl font-bold text-[#1a1a1a]">Dashboard</h1>
+          <p className="text-[#6b7280] text-sm">
             {new Date().toLocaleDateString('fr-FR', {
               weekday: 'long',
               year: 'numeric',
@@ -89,7 +88,7 @@ export default function DashboardPage() {
         </div>
         <button
           onClick={fetchData}
-          className="px-4 py-2 bg-indigo-600/20 border border-indigo-500/30 rounded-lg text-indigo-400 text-sm hover:bg-indigo-600/30 transition-colors"
+          className="px-4 py-2 bg-indigo-50 border border-indigo-100 rounded-lg text-indigo-600 text-sm hover:bg-indigo-100 transition-colors"
         >
           🔄 Actualiser
         </button>
@@ -98,42 +97,42 @@ export default function DashboardPage() {
       {/* Alertes */}
       {alerts.length > 0 && <AlertBanner alerts={alerts} />}
 
-      {/* Score de sentiment + CTA chat */}
+      {/* Score de sentiment + stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Score de sentiment */}
-        <div className="bg-[#1a1a2e] border border-[#2a2a4a] rounded-xl p-6 flex flex-col items-center justify-center">
+        <div className="bg-white border border-[#e5e7eb] rounded-xl p-6 flex flex-col items-center justify-center shadow-sm">
           <SentimentScore score={mockSentiment} />
         </div>
 
         {/* Stats rapides */}
         <div className="md:col-span-2 grid grid-cols-2 gap-4">
-          <div className="bg-[#1a1a2e] border border-[#2a2a4a] rounded-xl p-4">
-            <p className="text-slate-400 text-sm">Rapports générés</p>
-            <p className="text-white text-3xl font-bold mt-1">
+          <div className="bg-white border border-[#e5e7eb] rounded-xl p-4 shadow-sm">
+            <p className="text-[#6b7280] text-sm">Rapports générés</p>
+            <p className="text-[#1a1a1a] text-3xl font-bold mt-1">
               {latestReport ? '1+' : '0'}
             </p>
-            <p className="text-indigo-400 text-xs mt-1">Ce mois-ci</p>
+            <p className="text-indigo-500 text-xs mt-1">Ce mois-ci</p>
           </div>
-          <div className="bg-[#1a1a2e] border border-[#2a2a4a] rounded-xl p-4">
-            <p className="text-slate-400 text-sm">Alertes actives</p>
-            <p className={`text-3xl font-bold mt-1 ${alerts.length > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
+          <div className="bg-white border border-[#e5e7eb] rounded-xl p-4 shadow-sm">
+            <p className="text-[#6b7280] text-sm">Alertes actives</p>
+            <p className={`text-3xl font-bold mt-1 ${alerts.length > 0 ? 'text-amber-500' : 'text-emerald-600'}`}>
               {alerts.length}
             </p>
-            <p className="text-slate-500 text-xs mt-1">
+            <p className="text-[#9ca3af] text-xs mt-1">
               {alerts.length > 0 ? 'Requiert attention' : 'Tout est calme'}
             </p>
           </div>
-          <div className="bg-[#1a1a2e] border border-[#2a2a4a] rounded-xl p-4">
-            <p className="text-slate-400 text-sm">Sources de données</p>
-            <p className="text-white text-3xl font-bold mt-1">4</p>
-            <p className="text-emerald-400 text-xs mt-1">Actives</p>
+          <div className="bg-white border border-[#e5e7eb] rounded-xl p-4 shadow-sm">
+            <p className="text-[#6b7280] text-sm">Sources de données</p>
+            <p className="text-[#1a1a1a] text-3xl font-bold mt-1">4</p>
+            <p className="text-emerald-600 text-xs mt-1">Actives</p>
           </div>
-          <div className="bg-[#1a1a2e] border border-[#2a2a4a] rounded-xl p-4 bg-gradient-to-br from-indigo-600/20 to-purple-600/20 border-indigo-500/30">
-            <p className="text-slate-300 text-sm">Prochain rapport</p>
-            <p className="text-white text-lg font-bold mt-1">07:00 AM</p>
+          <div className="bg-white border border-[#e5e7eb] rounded-xl p-4 shadow-sm bg-gradient-to-br from-indigo-50 to-purple-50 border-indigo-100">
+            <p className="text-[#6b7280] text-sm">Prochain rapport</p>
+            <p className="text-[#1a1a1a] text-lg font-bold mt-1">07:00 AM</p>
             <Link
               href="/dashboard/chat"
-              className="text-indigo-400 text-xs mt-1 hover:text-indigo-300 transition-colors"
+              className="text-indigo-600 text-xs mt-1 hover:text-indigo-500 transition-colors"
             >
               💬 Poser une question →
             </Link>
@@ -143,8 +142,8 @@ export default function DashboardPage() {
 
       {/* Marchés */}
       {isLoading ? (
-        <div className="bg-[#1a1a2e] border border-[#2a2a4a] rounded-xl p-6 text-center">
-          <p className="text-slate-500">Chargement des données marché...</p>
+        <div className="bg-white border border-[#e5e7eb] rounded-xl p-6 text-center shadow-sm">
+          <p className="text-[#9ca3af]">Chargement des données marché...</p>
         </div>
       ) : (
         <MarketWidget data={marketData} />
@@ -154,10 +153,10 @@ export default function DashboardPage() {
       {latestReport ? (
         <div>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-white font-semibold">📄 Dernier rapport</h2>
+            <h2 className="text-[#1a1a1a] font-semibold">📄 Dernier rapport</h2>
             <Link
               href="/dashboard/reports"
-              className="text-indigo-400 text-sm hover:text-indigo-300 transition-colors"
+              className="text-indigo-600 text-sm hover:text-indigo-500 transition-colors"
             >
               Voir tous →
             </Link>
@@ -165,10 +164,10 @@ export default function DashboardPage() {
           <ReportCard report={latestReport} compact />
         </div>
       ) : (
-        <div className="bg-[#1a1a2e] border border-[#2a2a4a] rounded-xl p-8 text-center">
+        <div className="bg-white border border-[#e5e7eb] rounded-xl p-8 text-center shadow-sm">
           <p className="text-2xl mb-2">📭</p>
-          <p className="text-slate-400">Aucun rapport généré pour l&apos;instant</p>
-          <p className="text-slate-500 text-sm mt-1">
+          <p className="text-[#6b7280]">Aucun rapport généré pour l&apos;instant</p>
+          <p className="text-[#9ca3af] text-sm mt-1">
             Le premier rapport sera généré à 7h00 AM
           </p>
         </div>
