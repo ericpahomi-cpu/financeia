@@ -8,14 +8,10 @@ interface Message {
 }
 
 export default function ChatInterface() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: 'assistant',
-      content: 'Bonjour ! Je suis FinanceAI, votre conseiller financier IA. Comment puis-je vous aider aujourd\'hui ? Je peux analyser les marchés, expliquer des tendances, ou répondre à vos questions financières.',
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -27,6 +23,86 @@ export default function ChatInterface() {
     scrollToBottom();
   }, [messages]);
 
+  // Load conversation history on mount
+  useEffect(() => {
+    fetch('/api/conversations')
+      .then((r) => r.json())
+      .then((data) => {
+        const history: Message[] = (data.messages || []).map(
+          (m: { role: string; content: string }) => ({
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+          })
+        );
+        if (history.length === 0) {
+          // First visit — trigger onboarding greeting
+          setMessages([]);
+          triggerOnboarding();
+        } else {
+          setMessages(history);
+        }
+        setHistoryLoaded(true);
+      })
+      .catch(() => {
+        setHistoryLoaded(true);
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const triggerOnboarding = async () => {
+    setIsLoading(true);
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: 'Bonjour' }),
+      });
+      if (!response.body) return;
+      await streamResponse(response);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const streamResponse = async (response: Response) => {
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let assistantMessage = '';
+
+    setMessages((prev) => [...prev, { role: 'assistant', content: '' }]);
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value);
+      const lines = chunk.split('\n');
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          if (data === '[DONE]') break;
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.text) {
+              assistantMessage += parsed.text;
+              setMessages((prev) => {
+                const newMessages = [...prev];
+                newMessages[newMessages.length - 1] = {
+                  role: 'assistant',
+                  content: assistantMessage,
+                };
+                return newMessages;
+              });
+            }
+          } catch {
+            // Ignore parse errors
+          }
+        }
+      }
+    }
+  };
+
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!input.trim() || isLoading) return;
@@ -36,56 +112,17 @@ export default function ChatInterface() {
     setMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
     setIsLoading(true);
 
-    const history = messages.slice(1).map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
-
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMessage, history }),
+        body: JSON.stringify({ message: userMessage }),
       });
 
+      if (!response.ok) throw new Error('Erreur serveur');
       if (!response.body) throw new Error('No response body');
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let assistantMessage = '';
-
-      setMessages((prev) => [...prev, { role: 'assistant', content: '' }]);
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n');
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') break;
-            try {
-              const parsed = JSON.parse(data);
-              if (parsed.text) {
-                assistantMessage += parsed.text;
-                setMessages((prev) => {
-                  const newMessages = [...prev];
-                  newMessages[newMessages.length - 1] = {
-                    role: 'assistant',
-                    content: assistantMessage,
-                  };
-                  return newMessages;
-                });
-              }
-            } catch {
-              // Ignore parse errors for heartbeats
-            }
-          }
-        }
-      }
+      await streamResponse(response);
     } catch {
       setMessages((prev) => [
         ...prev,
@@ -105,6 +142,18 @@ export default function ChatInterface() {
       handleSubmit();
     }
   };
+
+  if (!historyLoaded) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="flex items-center gap-2 text-[#9ca3af] text-sm">
+          <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+          <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+          <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full">

@@ -1,7 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { createClient } from '@/lib/supabase/client';
 
 const navItems = [
   { href: '/dashboard', icon: '📊', label: 'Dashboard' },
@@ -12,13 +14,35 @@ const navItems = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const [userName, setUserName] = useState('');
+  const [userEmail, setUserEmail] = useState('');
+
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) {
+        const name = (user.user_metadata?.full_name as string) || user.email?.split('@')[0] || '';
+        setUserName(name);
+        setUserEmail(user.email || '');
+      }
+    });
+  }, []);
+
+  const handleLogout = async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push('/login');
+    router.refresh();
+  };
 
   return (
     <>
       {/* Sidebar desktop */}
       <aside className="hidden md:flex flex-col w-64 bg-white border-r border-[#e5e7eb] min-h-screen p-4">
-        <div className="flex items-center gap-3 mb-8 px-2">
-          <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-bold text-lg">
+        {/* Logo */}
+        <div className="flex items-center gap-3 mb-6 px-2">
+          <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-bold text-lg flex-shrink-0">
             FA
           </div>
           <div>
@@ -26,6 +50,14 @@ export default function Sidebar() {
             <p className="text-indigo-500 text-xs">Conseiller IA</p>
           </div>
         </div>
+
+        {/* User info */}
+        {userName && (
+          <div className="mx-2 mb-5 px-3 py-2.5 bg-[#f8f9fa] border border-[#e5e7eb] rounded-lg">
+            <p className="text-[#1a1a1a] text-sm font-medium truncate">{userName}</p>
+            <p className="text-[#9ca3af] text-xs truncate">{userEmail}</p>
+          </div>
+        )}
 
         <nav className="flex-1 space-y-1">
           {navItems.map((item) => {
@@ -48,9 +80,15 @@ export default function Sidebar() {
         </nav>
 
         <div className="border-t border-[#e5e7eb] pt-4 mt-4">
-          <div className="px-3 py-2">
-            <p className="text-[#9ca3af] text-xs">FinanceAI v1.0</p>
-            <p className="text-[#d1d5db] text-xs">Powered by Claude AI</p>
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[#6b7280] hover:bg-red-50 hover:text-red-600 transition-colors text-sm font-medium"
+          >
+            <span>🚪</span>
+            <span>Déconnexion</span>
+          </button>
+          <div className="px-3 pt-2">
+            <p className="text-[#d1d5db] text-xs">FinanceAI v1.0 — Powered by Claude AI</p>
           </div>
         </div>
       </aside>
