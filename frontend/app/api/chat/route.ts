@@ -3,7 +3,10 @@ import { NextRequest } from 'next/server';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
+  defaultHeaders: { 'anthropic-beta': 'web-search-2025-03-05' },
 });
+
+const SYSTEM_PROMPT = `Tu es FinanceAI, un conseiller financier personnel expert. Tu cherches toujours les données financières les plus récentes sur le web avant de répondre. Tes réponses sont en français, claires, simples et directes — jamais de symboles markdown, jamais de ##, **, ou *. Tu écris comme un conseiller humain qui parle à son client. Maximum 3-4 paragraphes par réponse. Tu bases tes conseils uniquement sur les données actuelles du marché.`;
 
 export async function POST(req: NextRequest) {
   try {
@@ -16,12 +19,8 @@ export async function POST(req: NextRequest) {
     const stream = await anthropic.messages.stream({
       model: 'claude-sonnet-4-6',
       max_tokens: 1024,
-      system: `Tu es FinanceAI, un conseiller financier IA expert et personnel.
-Tu as accès aux données du marché en temps réel et tu donnes des conseils
-précis, professionnels et actionnables. Tu réponds toujours en français
-sauf si le client te parle en anglais. Tu ne donnes jamais de conseils
-irresponsables. Tu es direct, concis et utile.
-Rappel important: tes réponses sont à des fins informationnelles uniquement.`,
+      system: SYSTEM_PROMPT,
+      tools: [{ type: 'web_search_20250305', name: 'web_search' }],
       messages: [
         ...(history || []),
         { role: 'user', content: message },

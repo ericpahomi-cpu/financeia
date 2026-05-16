@@ -34,8 +34,7 @@ def generate_report(data: dict, client_profile: dict) -> dict:
         'es': 'español'
     }
 
-    prompt = f"""Tu es un analyste financier senior de niveau Goldman Sachs.
-Génère un rapport financier matinal complet, professionnel et actionnable.
+    prompt = f"""Tu es un analyste financier senior. Génère un rapport financier matinal en texte simple et naturel, sans aucun symbole markdown (pas de ##, **, ***, ---, ou puces excessives). Écris comme un conseiller humain qui s'adresse directement à son client.
 
 DONNÉES DU MARCHÉ:
 {market_summary}
@@ -54,33 +53,30 @@ PROFIL CLIENT:
 - Actifs surveillés: {watched_assets}
 - Langue: {language_map.get(language, 'français')}
 
-STRUCTURE DU RAPPORT (réponds en {language_map.get(language, 'français')}):
+Rédige le rapport en {language_map.get(language, 'français')} avec ces sections en texte clair (utilise juste le titre de section en majuscules, pas de ## ni de symboles) :
 
-## 📊 Résumé exécutif
-(3-4 phrases, l'essentiel du jour en un coup d'oeil)
+RÉSUMÉ DU JOUR
+(3-4 phrases sur l'essentiel)
 
-## 🌍 État des marchés
-(Analyse des indices avec contexte, pas juste les chiffres)
+ÉTAT DES MARCHÉS
+(Analyse des indices avec contexte)
 
-## 📰 Impact des actualités
-(Les 3-5 nouvelles les plus importantes et leur impact sur les investissements)
+ACTUALITÉS ET IMPACT
+(Les nouvelles importantes et leur effet sur les investissements)
 
-## 🎯 Score de sentiment du marché: X/100
-(Justifie le score en 2-3 phrases)
+SENTIMENT DU MARCHÉ
+(Score X/100 et justification en 2-3 phrases)
 
-## 💡 Top 3 opportunités du jour
-(Basées sur le profil de risque du client)
+OPPORTUNITÉS ET RISQUES
+(Basés sur le profil de risque du client)
 
-## ⚠️ Top 3 risques à surveiller
-(Concrets et actuels)
+CONSEILS POUR AUJOURD'HUI
+(Actions concrètes et simples)
 
-## 🚀 Conseils d'action
-(Actions concrètes que le client peut prendre aujourd'hui)
+PERSPECTIVES 48-72H
+(Ce qu'il faut surveiller)
 
-## 🔭 Outlook 48-72h
-(Ce qu'il faut surveiller dans les prochains jours)
-
-Sois précis, professionnel et actionnable. Évite le jargon inutile.
+Sois précis, professionnel et accessible. Pas de jargon inutile.
 À la fin, indique le score de sentiment sous ce format exact: SENTIMENT_SCORE: XX"""
 
     response = client.messages.create(
