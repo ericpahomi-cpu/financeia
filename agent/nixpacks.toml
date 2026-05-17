@@ -1,8 +1,11 @@
-[phases.setup]
-nixPkgs = ["python311"]
+# Railway / Nixpacks — Python agent
+# providers = ["python"] lets Nixpacks manage Python + pip automatically.
+# Do NOT use nixPkgs = ["python311"] alone — that gives the interpreter but not pip.
+
+providers = ["python"]
 
 [phases.install]
-cmds = ["pip install -r requirements.txt"]
+cmds = ["pip install --no-cache-dir -r requirements.txt"]
 
 [start]
 cmd = "python continuous_agent.py"
