@@ -15,16 +15,20 @@ export async function GET() {
     return NextResponse.json({ messages: [] }, { status: 401 });
   }
 
-  const { data: messages, error } = await supabaseAdmin
+  // Fetch last 20 messages newest-first, then reverse for chronological display
+  const { data: raw, error } = await supabaseAdmin
     .from('conversations')
     .select('role, content, created_at')
     .eq('client_id', user.id)
-    .order('created_at', { ascending: true })
-    .limit(50);
+    .order('created_at', { ascending: false })
+    .limit(20);
+
+  const messages = raw ? [...raw].reverse() : [];
 
   if (error) {
+    console.error('[conversations] Erreur fetch:', error.message);
     return NextResponse.json({ messages: [] });
   }
 
-  return NextResponse.json({ messages: messages || [] });
+  return NextResponse.json({ messages });
 }

@@ -63,14 +63,14 @@ export async function POST(req: NextRequest) {
 
     const firstName = ((user.user_metadata?.full_name as string) || user.email?.split('@')[0] || 'Client').split(' ')[0];
 
-    // Fetch conversation history + user settings in parallel
-    const [{ data: history }, { data: settingsData }] = await Promise.all([
+    // Fetch last 20 messages (10 exchanges) + user settings in parallel
+    const [{ data: historyRaw }, { data: settingsData }] = await Promise.all([
       supabaseAdmin
         .from('conversations')
         .select('role, content')
         .eq('client_id', user.id)
-        .order('created_at', { ascending: true })
-        .limit(50),
+        .order('created_at', { ascending: false }) // newest first
+        .limit(20),
       supabaseAdmin
         .from('user_settings')
         .select('language')
@@ -78,9 +78,12 @@ export async function POST(req: NextRequest) {
         .single(),
     ]);
 
+    // Reverse so messages are chronological (oldest → newest) for Claude
+    const history = historyRaw ? [...historyRaw].reverse() : [];
+
     const lang = (settingsData as { language?: string } | null)?.language ?? 'fr';
     const langLabel = LANG_NAMES[lang] ?? 'français';
-    const isFirstConversation = !history || history.length === 0;
+    const isFirstConversation = history.length === 0;
 
     const systemPrompt = isFirstConversation
       ? `Tu es le conseiller financier personnel de ${firstName}. Tu parles UNIQUEMENT en ${langLabel}.
@@ -89,31 +92,33 @@ INTERDIT ABSOLU : aucun symbole markdown. Pas de **, pas de ##, pas de ---, pas 
 
       : `Tu es le conseiller financier personnel de ${firstName}. Tu parles UNIQUEMENT en ${langLabel}.
 
-TON STYLE — LIS ATTENTIVEMENT :
-Tu parles exactement comme un conseiller de Goldman Sachs qui s'adresse à un ami. Phrases courtes. Naturelles. Directes.
+STYLE : Conseiller Goldman Sachs qui parle à un ami. Phrases courtes. Directes. Maximum 4 phrases.
 
-EXEMPLES CONCRETS DE CE QUE TU NE DOIS JAMAIS FAIRE :
-❌ "**Apple** a publié de bons résultats"  → utilise des astérisques
-❌ "### Analyse de marché"                 → utilise des dièses
-❌ "- Hausse des taux"                     → utilise un tiret de liste
-❌ "1. Le marché 2. Les actions"            → utilise une liste numérotée
-❌ "---"                                   → utilise une ligne de séparation
-❌ "Voici les points clés :"               → introduit une liste
+INTERDIT (markdown) :
+❌ **, ***, ##, ###, ---, tirets de liste, listes numérotées. Texte brut uniquement.
 
-EXEMPLES CONCRETS DE CE QUE TU DOIS FAIRE :
-✅ "Apple a publié de bons résultats ce trimestre. Le marché a bien réagi."
-✅ "La Fed a monté ses taux. Ça presse les obligations mais l'or tient bien."
-✅ "Solana est volatile en ce moment. Si tu veux voir le graphique : [CHART:SOL-USD]"
+GRAPHIQUES — RÈGLE ABSOLUE :
+Dès que tu mentionnes une action ou une crypto par son nom → tu TERMINES ta réponse par [CHART:SYMBOLE].
+Ce tag est obligatoire. Sans exception.
 
-RÈGLES :
-- Maximum 4 phrases. Jamais plus.
-- Zéro markdown. Zéro astérisque. Zéro dièse. Zéro tiret de liste. Texte brut uniquement.
-- Si un graphique aide, écris exactement : [CHART:SYMBOLE] sur sa propre ligne. Ex: [CHART:AAPL] [CHART:BTC-USD]
-- Tu connais déjà ${firstName}. Jamais de présentation.
-- Tu cherches les données en temps réel avant de répondre.`;
+Symboles crypto : BTC-USD, ETH-USD, SOL-USD, BNB-USD, XRP-USD, DOGE-USD, AVAX-USD, MATIC-USD, LINK-USD, ADA-USD
+Symboles actions : AAPL, MSFT, TSLA, AMZN, GOOGL, NVDA, META, NFLX, SHOP, COIN
+
+EXEMPLES OBLIGATOIRES :
+"Solana a progressé de 12% cette semaine. Le momentum technique est fort. [CHART:SOL-USD]"
+"Apple publie ses résultats jeudi. Le marché anticipe une surprise positive. [CHART:AAPL]"
+"Bitcoin consolide autour de 95k. La tendance reste haussière. [CHART:BTC-USD]"
+"Nvidia domine le marché des GPU IA. La demande reste très forte. [CHART:NVDA]"
+
+INTERDIT ABSOLU :
+❌ "Consultez coinbase.com" — l'application affiche les graphiques directement, ne renvoie JAMAIS vers un site externe
+❌ "Regardez sur coinmarketcap / yahoo finance / tradingview" — même raison
+❌ Répondre sans [CHART:X] quand tu parles d'un actif spécifique
+
+Tu connais déjà ${firstName}. Jamais de présentation. Tu cherches les données en temps réel avant de répondre.`;
 
     const claudeMessages: { role: 'user' | 'assistant'; content: string }[] = [
-      ...(history || []).map((m) => ({
+      ...history.map((m) => ({
         role: m.role as 'user' | 'assistant',
         content: m.content as string,
       })),
@@ -147,19 +152,28 @@ RÈGLES :
               );
             }
           }
+
+          // ── Save to DB BEFORE sending [DONE] ────────────────────────────
+          // Doing it after controller.close() risks the serverless function
+          // being killed before the await resolves.
+          if (assistantContent) {
+            const cleanContent = stripMarkdown(assistantContent);
+            const { error: insertError } = await supabaseAdmin
+              .from('conversations')
+              .insert([
+                { client_id: user.id, role: 'user',      content: message      },
+                { client_id: user.id, role: 'assistant', content: cleanContent },
+              ]);
+            if (insertError) {
+              console.error('[chat] Erreur sauvegarde conversation:', insertError.message);
+            }
+          }
+
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
         } catch (error) {
           controller.error(error);
         } finally {
           controller.close();
-          if (assistantContent) {
-            // Strip markdown before persisting so history stays clean
-            const cleanContent = stripMarkdown(assistantContent);
-            await supabaseAdmin.from('conversations').insert([
-              { client_id: user.id, role: 'user', content: message },
-              { client_id: user.id, role: 'assistant', content: cleanContent },
-            ]);
-          }
         }
       },
     });
