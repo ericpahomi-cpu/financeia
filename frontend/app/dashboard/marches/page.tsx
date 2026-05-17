@@ -3,39 +3,40 @@
 import { useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { STOCKS, StockDef } from '@/lib/stocks';
+import { toTVSymbol } from '@/lib/tv-symbol';
+import { useLanguage } from '@/lib/language-context';
+import Toast from '@/components/Toast';
 
-const TradingChart = dynamic(() => import('@/components/TradingChart'), { ssr: false });
+const TradingViewWidget = dynamic(() => import('@/components/TradingViewWidget'), { ssr: false });
 
 interface Quote {
   symbol: string; name: string; price: number;
-  change: number; changePct: number; currency: string;
+  change: number; changePct: number; currency: string; volume?: number;
 }
 interface SearchResult { symbol: string; name: string; exchange: string; }
-interface SelectedStock { symbol: string; name: string; type: 'stock' }
+interface SelectedStock { symbol: string; name: string; tvSymbol: string; }
 
 export default function MarchesPage() {
-  const [quotes, setQuotes]           = useState<Record<string, Quote>>({});
-  const [favorites, setFavorites]     = useState<Set<string>>(new Set());
-  const [search, setSearch]           = useState('');
+  const { t } = useLanguage();
+  const [quotes, setQuotes]               = useState<Record<string, Quote>>({});
+  const [favorites, setFavorites]         = useState<Set<string>>(new Set());
+  const [search, setSearch]               = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
-  const [selected, setSelected]       = useState<SelectedStock | null>(null);
-  const [currency, setCurrency]       = useState<'USD' | 'CAD'>('CAD');
-  const [usdcad, setUsdcad]           = useState(1.36);
+  const [selected, setSelected]           = useState<SelectedStock | null>(null);
+  const [currency, setCurrency]           = useState<'USD' | 'CAD'>('CAD');
+  const [usdcad, setUsdcad]               = useState(1.36);
   const [isLoadingSearch, setIsLoadingSearch] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'NASDAQ' | 'NYSE' | 'TSX'>('all');
+  const [filter, setFilter]               = useState<'all' | 'NASDAQ' | 'NYSE' | 'TSX'>('all');
+  const [toast, setToast]                 = useState<string | null>(null);
 
-  const visibleStocks: StockDef[] = filter === 'all'
-    ? STOCKS
-    : STOCKS.filter((s) => s.exchange === filter);
+  const visibleStocks: StockDef[] = filter === 'all' ? STOCKS : STOCKS.filter((s) => s.exchange === filter);
 
-  // Load favorites
   useEffect(() => {
     fetch('/api/favorites')
       .then((r) => r.json())
       .then((d) => setFavorites(new Set((d.favorites || []).map((f: { symbol: string }) => f.symbol))));
   }, []);
 
-  // Fetch quotes for visible stocks
   useEffect(() => {
     const symbols = visibleStocks.map((s) => s.symbol).join(',');
     fetch(`/api/markets?symbols=${encodeURIComponent(symbols)}`)
@@ -47,14 +48,12 @@ export default function MarchesPage() {
       });
   }, [filter]); // eslint-disable-line
 
-  // Fetch USD/CAD rate
   useEffect(() => {
     fetch('/api/markets?symbols=USDCAD%3DX')
       .then((r) => r.json())
       .then((d) => { if (d.quotes?.[0]) setUsdcad(d.quotes[0].price); });
   }, []);
 
-  // Search with debounce
   const doSearch = useCallback(async (q: string) => {
     if (!q) { setSearchResults([]); return; }
     setIsLoadingSearch(true);
@@ -66,19 +65,21 @@ export default function MarchesPage() {
   }, []);
 
   useEffect(() => {
-    const t = setTimeout(() => doSearch(search), 400);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => doSearch(search), 400);
+    return () => clearTimeout(timer);
   }, [search, doSearch]);
 
-  const toggleFavorite = async (stock: StockDef) => {
+  const toggleFavorite = async (stock: { symbol: string; name: string; exchange?: string }) => {
     const isFav = favorites.has(stock.symbol);
-    const next = new Set(favorites);
+    const next  = new Set(favorites);
     if (isFav) {
       next.delete(stock.symbol);
       await fetch('/api/favorites', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: stock.symbol }) });
+      setToast('❌ Retiré des favoris');
     } else {
       next.add(stock.symbol);
       await fetch('/api/favorites', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: stock.symbol, type: 'stock', name: stock.name }) });
+      setToast('⭐ Ajouté aux favoris');
     }
     setFavorites(next);
   };
@@ -86,7 +87,7 @@ export default function MarchesPage() {
   const displayPrice = (q: Quote | undefined) => {
     if (!q) return '—';
     let price = q.price;
-    let cur = q.currency;
+    let cur   = q.currency;
     if (currency === 'CAD' && q.currency === 'USD') { price *= usdcad; cur = 'CAD'; }
     if (currency === 'USD' && q.currency === 'CAD') { price /= usdcad; cur = 'USD'; }
     return `${price.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${cur}`;
@@ -98,13 +99,14 @@ export default function MarchesPage() {
 
   return (
     <div className="p-4 md:p-6 space-y-5">
+      <Toast message={toast} onDone={() => setToast(null)} />
+
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-[#1a1a1a]">🌍 Marchés</h1>
-          <p className="text-[#6b7280] text-sm">Actions US (NYSE / NASDAQ) et Canada (TSX)</p>
+          <h1 className="text-2xl font-bold text-[#1a1a1a]">🌍 {t.markets_title}</h1>
+          <p className="text-[#6b7280] text-sm">{t.markets_subtitle}</p>
         </div>
-        {/* Currency toggle */}
         <div className="flex items-center gap-1 bg-[#f3f4f6] rounded-lg p-1">
           {(['CAD', 'USD'] as const).map((c) => (
             <button key={c} onClick={() => setCurrency(c)}
@@ -117,12 +119,9 @@ export default function MarchesPage() {
 
       {/* Search */}
       <div className="relative">
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Rechercher par nom ou symbole..."
-          className="w-full bg-white border border-[#e5e7eb] rounded-xl px-4 py-3 text-sm text-[#1a1a1a] placeholder-[#9ca3af] focus:outline-none focus:border-indigo-400 pl-10"
-        />
+        <input value={search} onChange={(e) => setSearch(e.target.value)}
+          placeholder={t.markets_search}
+          className="w-full bg-white border border-[#e5e7eb] rounded-xl px-4 py-3 text-sm text-[#1a1a1a] placeholder-[#9ca3af] focus:outline-none focus:border-indigo-400 pl-10" />
         <span className="absolute left-3 top-3.5 text-[#9ca3af]">🔍</span>
         {isLoadingSearch && <span className="absolute right-3 top-3.5 text-[#9ca3af] text-xs">...</span>}
       </div>
@@ -133,7 +132,7 @@ export default function MarchesPage() {
           {(['all', 'NASDAQ', 'NYSE', 'TSX'] as const).map((ex) => (
             <button key={ex} onClick={() => setFilter(ex)}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filter === ex ? 'bg-indigo-600 text-white' : 'bg-white border border-[#e5e7eb] text-[#6b7280] hover:border-indigo-300'}`}>
-              {ex === 'all' ? 'Tous' : ex}
+              {ex === 'all' ? t.markets_all : ex}
             </button>
           ))}
         </div>
@@ -146,19 +145,19 @@ export default function MarchesPage() {
             <tr className="border-b border-[#e5e7eb] bg-[#f8f9fa]">
               <th className="px-4 py-3 text-left text-[#6b7280] font-medium">Symbole</th>
               <th className="px-4 py-3 text-left text-[#6b7280] font-medium hidden sm:table-cell">Nom</th>
-              <th className="px-4 py-3 text-right text-[#6b7280] font-medium">Prix</th>
-              <th className="px-4 py-3 text-right text-[#6b7280] font-medium">Variation</th>
+              <th className="px-4 py-3 text-right text-[#6b7280] font-medium">{t.markets_price}</th>
+              <th className="px-4 py-3 text-right text-[#6b7280] font-medium">{t.markets_change}</th>
               <th className="px-4 py-3 text-center text-[#6b7280] font-medium w-12">★</th>
             </tr>
           </thead>
           <tbody>
             {stocksToShow.map((stock) => {
-              const q = quotes[stock.symbol];
-              const isUp = (q?.changePct ?? 0) >= 0;
+              const q     = quotes[stock.symbol];
+              const isUp  = (q?.changePct ?? 0) >= 0;
               const isFav = favorites.has(stock.symbol);
               return (
                 <tr key={stock.symbol}
-                  onClick={() => setSelected({ symbol: stock.symbol, name: stock.name, type: 'stock' })}
+                  onClick={() => setSelected({ symbol: stock.symbol, name: stock.name, tvSymbol: toTVSymbol(stock.symbol, 'stock') })}
                   className="border-b border-[#f3f4f6] hover:bg-[#f8f9fa] cursor-pointer transition-colors">
                   <td className="px-4 py-3">
                     <div className="font-semibold text-[#1a1a1a]">{stock.symbol}</div>
@@ -170,8 +169,9 @@ export default function MarchesPage() {
                     {q ? `${isUp ? '+' : ''}${q.changePct.toFixed(2)}%` : '—'}
                   </td>
                   <td className="px-4 py-3 text-center">
-                    <button onClick={(e) => { e.stopPropagation(); toggleFavorite(stock as StockDef); }}
-                      className={`text-lg transition-colors ${isFav ? 'text-amber-400' : 'text-[#d1d5db] hover:text-amber-300'}`}>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleFavorite(stock); }}
+                      className={`text-lg transition-all duration-200 ${isFav ? 'text-amber-400 scale-110' : 'text-[#d1d5db] hover:text-amber-300'}`}>
                       ★
                     </button>
                   </td>
@@ -184,16 +184,17 @@ export default function MarchesPage() {
 
       {/* Chart modal */}
       {selected && (
-        <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4" onClick={() => setSelected(null)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setSelected(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h2 className="text-lg font-bold text-[#1a1a1a]">{selected.symbol}</h2>
                 <p className="text-[#6b7280] text-sm">{selected.name}</p>
+                <p className="text-[#9ca3af] text-xs">{selected.tvSymbol}</p>
               </div>
-              <button onClick={() => setSelected(null)} className="text-[#9ca3af] hover:text-[#6b7280] text-2xl">×</button>
+              <button onClick={() => setSelected(null)} className="text-[#9ca3af] hover:text-[#6b7280] text-2xl leading-none">&times;</button>
             </div>
-            <TradingChart symbol={selected.symbol} type="stock" height={300} />
+            <TradingViewWidget tvSymbol={selected.tvSymbol} height={500} />
           </div>
         </div>
       )}

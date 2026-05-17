@@ -6,8 +6,9 @@ import dynamic from 'next/dynamic';
 import SentimentScore from '@/components/SentimentScore';
 import AlertBanner from '@/components/AlertBanner';
 import ReportCard from '@/components/ReportCard';
+import { toTVSymbol } from '@/lib/tv-symbol';
 
-const TradingChart = dynamic(() => import('@/components/TradingChart'), { ssr: false });
+const TradingViewWidget = dynamic(() => import('@/components/TradingViewWidget'), { ssr: false });
 
 interface Alert { id: string; type: string; asset: string; message: string; triggered_at: string; }
 interface MarketItem { symbol: string; price: number; change_pct: number; direction: 'up' | 'down'; }
@@ -195,7 +196,7 @@ export default function DashboardPage() {
               const pl = pnl(fav);
               return (
                 <div key={fav.symbol}
-                  onClick={() => setSelected({ symbol: fav.type === 'crypto' ? fav.symbol.toLowerCase() : fav.symbol, name: fav.name, type: fav.type })}
+                  onClick={() => setSelected({ symbol: fav.symbol, name: fav.name, type: fav.type })}
                   className="bg-white border border-[#e5e7eb] rounded-xl p-4 shadow-sm hover:shadow-md hover:border-indigo-200 cursor-pointer transition-all">
                   <div className="flex items-center justify-between mb-2">
                     <div>
@@ -237,16 +238,16 @@ export default function DashboardPage() {
 
       {/* Chart modal */}
       {selected && (
-        <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4" onClick={() => setSelected(null)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setSelected(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h2 className="text-lg font-bold text-[#1a1a1a]">{selected.symbol.toUpperCase()}</h2>
                 <p className="text-[#6b7280] text-sm">{selected.name}</p>
               </div>
-              <button onClick={() => setSelected(null)} className="text-[#9ca3af] hover:text-[#6b7280] text-2xl">×</button>
+              <button onClick={() => setSelected(null)} className="text-[#9ca3af] hover:text-[#6b7280] text-2xl leading-none">&times;</button>
             </div>
-            <TradingChart symbol={selected.symbol} type={selected.type} height={300} />
+            <TradingViewWidget tvSymbol={toTVSymbol(selected.symbol, selected.type)} height={400} />
           </div>
         </div>
       )}

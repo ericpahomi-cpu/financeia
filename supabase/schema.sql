@@ -70,12 +70,40 @@ CREATE TABLE IF NOT EXISTS agent_memory (
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Watchlist personnelle de l'utilisateur (items sauvegardés depuis "À surveiller")
+CREATE TABLE IF NOT EXISTS watchlist (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  symbol     TEXT NOT NULL,
+  name       TEXT,
+  type       TEXT NOT NULL DEFAULT 'stock' CHECK (type IN ('stock', 'crypto')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(user_id, symbol)
+);
+CREATE INDEX IF NOT EXISTS idx_watchlist_user ON watchlist(user_id, created_at DESC);
+
+-- Cache d'actualités (populé par l'agent Python toutes les 30 min)
+CREATE TABLE IF NOT EXISTS news_cache (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  category     TEXT NOT NULL DEFAULT 'all',
+  title        TEXT NOT NULL,
+  description  TEXT,
+  url          TEXT,
+  source       TEXT,
+  published_at TIMESTAMPTZ,
+  image        TEXT,
+  fetched_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_news_cache_cat ON news_cache(category, fetched_at DESC);
+
 -- RLS
 ALTER TABLE favorites     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE portfolio     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
 
+ALTER TABLE watchlist ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "own_watchlist"     ON watchlist     FOR ALL USING (auth.uid() = user_id);
 CREATE POLICY "own_favorites"     ON favorites     FOR ALL USING (auth.uid() = client_id);
 CREATE POLICY "own_settings"      ON user_settings FOR ALL USING (auth.uid() = id);
 CREATE POLICY "own_portfolio"     ON portfolio     FOR ALL USING (auth.uid() = client_id);

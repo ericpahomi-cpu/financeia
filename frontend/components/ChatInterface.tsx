@@ -3,16 +3,37 @@
 import { useState, useRef, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { useLanguage } from '@/lib/language-context';
+import { toTVSymbol } from '@/lib/tv-symbol';
 
-const TradingChart = dynamic(() => import('@/components/TradingChart'), { ssr: false });
+const TradingViewWidget = dynamic(() => import('@/components/TradingViewWidget'), { ssr: false });
 
 interface Message {
   role: 'user' | 'assistant';
   content: string;
 }
 
-// ── Chart tag parser ────────────────────────────────────────────────────────
-// Splits a message into text segments and [CHART:SYMBOL] tags
+// ── Markdown stripper (mirrors server-side, runs before display) ─────────────
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*\*([\s\S]+?)\*\*\*/g, '$1')
+    .replace(/\*\*([\s\S]+?)\*\*/g, '$1')
+    .replace(/\*([\s\S]+?)\*/g, '$1')
+    .replace(/_{2}([\s\S]+?)_{2}/g, '$1')
+    .replace(/_([^_\n]+)_/g, '$1')
+    .replace(/^\s*[-*+]\s+/gm, '')
+    .replace(/^\s*\d+\.\s+/gm, '')
+    .replace(/^-{3,}\s*$/gm, '')
+    .replace(/^={3,}\s*$/gm, '')
+    .replace(/```[\s\S]*?```/g, (m) =>
+      m.replace(/^```[^\n]*\n?/, '').replace(/\n?```$/, ''))
+    .replace(/`([^`\n]+)`/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+// ── Chart tag parser ─────────────────────────────────────────────────────────
 type Segment = { type: 'text'; text: string } | { type: 'chart'; symbol: string };
 
 function parseSegments(content: string): Segment[] {
@@ -35,60 +56,65 @@ function parseSegments(content: string): Segment[] {
   return segments;
 }
 
-// ── Inline chart range picker + chart ──────────────────────────────────────
-type MiniRange = '1J' | '1SEM' | '1MOIS';
+// ── Text-only content (inside bubble) ────────────────────────────────────────
+function BubbleText({ content }: { content: string }) {
+  const clean    = stripMarkdown(content);
+  const segments = parseSegments(clean);
+  // Render only text portions; charts are rendered outside the bubble
+  const textOnly = segments
+    .filter((s): s is { type: 'text'; text: string } => s.type === 'text')
+    .map((s) => s.text)
+    .join('');
+  return <span style={{ whiteSpace: 'pre-wrap' }}>{textOnly}</span>;
+}
 
+// ── Full-width chart block (below bubble, only after streaming ends) ──────────
 function InlineChart({ symbol }: { symbol: string }) {
-  const [range, setRange] = useState<MiniRange>('1MOIS');
-
-  // Detect if it's a crypto by checking for -USD suffix or known crypto tickers
-  const isCrypto = symbol.includes('-') || /^(BTC|ETH|SOL|BNB|ADA|XRP|DOGE|DOT|AVAX|MATIC|LINK|UNI|ATOM|LTC)$/i.test(symbol);
-  const chartSymbol = isCrypto ? symbol.toLowerCase() : symbol;
+  const isCrypto = symbol.includes('-') ||
+    /^(BTC|ETH|SOL|BNB|ADA|XRP|DOGE|DOT|AVAX|MATIC|LINK|UNI|ATOM|LTC|SUI|APT|INJ|SEI|TIA|NEAR|TON|SHIB|TRX|PEPE)$/i.test(symbol);
+  const tvSymbol = toTVSymbol(symbol, isCrypto ? 'crypto' : 'stock');
 
   return (
-    <div className="mt-2 mb-1 rounded-xl border border-[#e5e7eb] overflow-hidden bg-white">
-      {/* Mini range bar */}
-      <div className="flex gap-1 px-3 pt-2">
-        {(['1J', '1SEM', '1MOIS'] as MiniRange[]).map((r) => (
-          <button
-            key={r}
-            onClick={() => setRange(r)}
-            className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
-              range === r ? 'bg-indigo-600 text-white' : 'bg-[#f3f4f6] text-[#6b7280] hover:bg-[#e5e7eb]'
-            }`}
-          >
-            {r}
-          </button>
-        ))}
-        <span className="ml-auto text-xs text-[#9ca3af] self-center">{symbol}</span>
+    <div className="mt-3 rounded-xl border border-[#e5e7eb] bg-white shadow-sm">
+      <div className="px-4 pt-3 pb-1 flex items-center justify-between border-b border-[#f3f4f6]">
+        <span className="font-semibold text-sm text-[#1a1a1a]">{symbol}</span>
+        <span className="text-[#9ca3af] text-xs">{tvSymbol}</span>
       </div>
-      <TradingChart symbol={chartSymbol} type={isCrypto ? 'crypto' : 'stock'} height={200} rangeOverride={range} />
+      {/* Give TradingView a clean, fixed-height container with no overflow clipping */}
+      <div style={{ height: 420, width: '100%' }}>
+        <TradingViewWidget tvSymbol={tvSymbol} height={420} />
+      </div>
     </div>
   );
 }
 
-// ── Message renderer ────────────────────────────────────────────────────────
-function MessageContent({ content }: { content: string }) {
-  const segments = parseSegments(content);
+function ChartPlaceholder() {
   return (
-    <>
-      {segments.map((seg, i) =>
-        seg.type === 'text' ? (
-          <span key={i} style={{ whiteSpace: 'pre-wrap' }}>{seg.text}</span>
-        ) : (
-          <InlineChart key={i} symbol={seg.symbol} />
-        )
-      )}
-    </>
+    <div className="mt-3 rounded-xl border border-[#e5e7eb] bg-[#f8f9fa] animate-pulse"
+      style={{ height: 60 }}>
+      <div className="px-4 py-4 flex items-center gap-2 text-[#9ca3af] text-sm">
+        <span>📊</span>
+        <span>Chargement du graphique…</span>
+      </div>
+    </div>
   );
 }
 
-// ── Main component ──────────────────────────────────────────────────────────
+/** Extract chart symbols from a message that has finished streaming */
+function getChartSymbols(content: string): string[] {
+  const clean = stripMarkdown(content);
+  const segments = parseSegments(clean);
+  return segments
+    .filter((s): s is { type: 'chart'; symbol: string } => s.type === 'chart')
+    .map((s) => s.symbol);
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
 export default function ChatInterface() {
   const { t } = useLanguage();
-  const [messages, setMessages]     = useState<Message[]>([]);
-  const [input, setInput]           = useState('');
-  const [isLoading, setIsLoading]   = useState(false);
+  const [messages, setMessages]           = useState<Message[]>([]);
+  const [input, setInput]                 = useState('');
+  const [isLoading, setIsLoading]         = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef    = useRef<HTMLTextAreaElement>(null);
@@ -163,7 +189,7 @@ export default function ChatInterface() {
                 return next;
               });
             }
-          } catch { /* ignore */ }
+          } catch { /* ignore partial JSON */ }
         }
       }
     }
@@ -184,13 +210,12 @@ export default function ChatInterface() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: userMessage }),
       });
-
       if (!response.ok || !response.body) throw new Error('Erreur serveur');
       await streamResponse(response);
     } catch {
       setMessages((prev) => [
         ...prev,
-        { role: 'assistant', content: 'Désolé, une erreur s\'est produite. Veuillez réessayer.' },
+        { role: 'assistant', content: "Désolé, une erreur s'est produite. Veuillez réessayer." },
       ]);
     } finally {
       setIsLoading(false);
@@ -217,39 +242,62 @@ export default function ChatInterface() {
     <div className="flex flex-col h-full">
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
-        {messages.map((message, index) => (
-          <div key={index} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            {message.role === 'assistant' && (
-              <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mr-2 mt-1">
-                AI
+        {messages.map((message, index) => {
+          const isLastAndStreaming = isLoading && index === messages.length - 1;
+          const chartSymbols = message.role === 'assistant'
+            ? getChartSymbols(message.content)
+            : [];
+
+          return (
+            <div key={index}>
+              {/* ── Bubble row ── */}
+              <div className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                {message.role === 'assistant' && (
+                  <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mr-2 mt-1">
+                    AI
+                  </div>
+                )}
+
+                <div
+                  className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                    message.role === 'user'
+                      ? 'bg-indigo-600 text-white rounded-tr-sm'
+                      : 'bg-white border border-[#e5e7eb] text-[#1a1a1a] rounded-tl-sm shadow-sm'
+                  }`}
+                >
+                  {message.content ? (
+                    message.role === 'assistant'
+                      ? <BubbleText content={message.content} />
+                      : <span style={{ whiteSpace: 'pre-wrap' }}>{message.content}</span>
+                  ) : (
+                    // Streaming dots
+                    <span className="flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </span>
+                  )}
+                </div>
+
+                {message.role === 'user' && (
+                  <div className="w-8 h-8 rounded-full bg-[#e5e7eb] flex items-center justify-center text-[#6b7280] text-xs font-bold flex-shrink-0 ml-2 mt-1">
+                    Vous
+                  </div>
+                )}
               </div>
-            )}
-            <div
-              className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                message.role === 'user'
-                  ? 'bg-indigo-600 text-white rounded-tr-sm'
-                  : 'bg-white border border-[#e5e7eb] text-[#1a1a1a] rounded-tl-sm shadow-sm'
-              }`}
-            >
-              {message.content ? (
-                message.role === 'assistant'
-                  ? <MessageContent content={message.content} />
-                  : <span style={{ whiteSpace: 'pre-wrap' }}>{message.content}</span>
-              ) : (
-                <span className="flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                </span>
+
+              {/* ── Charts — rendered OUTSIDE the bubble, AFTER streaming ends ── */}
+              {message.role === 'assistant' && chartSymbols.length > 0 && (
+                <div className="ml-10 space-y-3">
+                  {isLastAndStreaming
+                    ? chartSymbols.map((_, i) => <ChartPlaceholder key={i} />)
+                    : chartSymbols.map((sym) => <InlineChart key={sym} symbol={sym} />)
+                  }
+                </div>
               )}
             </div>
-            {message.role === 'user' && (
-              <div className="w-8 h-8 rounded-full bg-[#e5e7eb] flex items-center justify-center text-[#6b7280] text-xs font-bold flex-shrink-0 ml-2 mt-1">
-                Vous
-              </div>
-            )}
-          </div>
-        ))}
+          );
+        })}
         <div ref={messagesEndRef} />
       </div>
 

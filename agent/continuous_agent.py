@@ -1,6 +1,8 @@
 """
 FinanceAI — Agent continu 24h/24
-Tourne sur Railway avec surveillance toutes les 5 minutes pendant les heures de marché.
+Tourne sur Railway avec surveillance toutes les 15 minutes pendant les heures de marché.
+Détection d'événements majeurs (>5% sur indices) → alerte TOUS les clients.
+Cache d'actualités NewsAPI rechargé toutes les 30 minutes.
 """
 import os, json, time, logging, datetime
 from zoneinfo import ZoneInfo
@@ -50,6 +52,14 @@ def get_all_clients() -> list[dict]:
 def get_client_favorites(client_id: str) -> list[dict]:
     try:
         res = SUPABASE.from_('favorites').select('symbol, type, name').eq('client_id', client_id).execute()
+        return res.data or []
+    except Exception:
+        return []
+
+def get_client_watchlist(user_id: str) -> list[dict]:
+    """Lit la watchlist personnelle de l'utilisateur (table watchlist, colonne user_id)."""
+    try:
+        res = SUPABASE.from_('watchlist').select('symbol, type, name').eq('user_id', user_id).execute()
         return res.data or []
     except Exception:
         return []
@@ -119,8 +129,78 @@ def save_prediction(client_id: str | None, asset: str, direction: str, confidenc
 
 # ─── Core tasks ─────────────────────────────────────────────────────────────
 
+MAJOR_EVENT_THRESHOLD = 5.0  # percent
+
+def check_major_market_events():
+    """
+    Pour chaque utilisateur ayant une watchlist, vérifie si un de leurs actifs
+    a bougé de plus de MAJOR_EVENT_THRESHOLD% et envoie une alerte personnalisée.
+    Remplace les indices hardcodés par les actions spécifiques de chaque client.
+    """
+    if not is_market_open():
+        return
+
+    clients = get_all_clients()
+    if not clients:
+        return
+
+    # Build a unique set of symbols across all watchlists (avoid duplicate API calls)
+    user_watchlists: dict[str, list[dict]] = {}
+    all_symbols: set[str] = set()
+
+    for client in clients:
+        uid = client.get('id') or client.get('client_id')
+        if not uid:
+            continue
+        # Use favorites table (same table used by the frontend star buttons)
+        items = get_client_favorites(uid)
+        if items:
+            user_watchlists[uid] = items
+            all_symbols.update(i['symbol'] for i in items if i.get('type') == 'stock')
+
+    if not all_symbols:
+        log.info('No watchlist symbols to monitor for major events.')
+        return
+
+    # Fetch prices once per unique symbol
+    price_cache: dict[str, dict] = {}
+    for sym in all_symbols:
+        data = get_yahoo_price(sym)
+        if data:
+            price_cache[sym] = data
+
+    # Per-user: alert on symbols that crossed the threshold
+    for client in clients:
+        uid   = client.get('id') or client.get('client_id')
+        email = client.get('email', '')
+        items = user_watchlists.get(uid, [])
+
+        for item in items:
+            sym = item.get('symbol', '')
+            if item.get('type') != 'stock' or sym not in price_cache:
+                continue
+            data = price_cache[sym]
+            pct  = data['change_pct']
+            if abs(pct) < MAJOR_EVENT_THRESHOLD:
+                continue
+
+            direction = 'hausse' if pct > 0 else 'baisse'
+            name_label = item.get('name') or sym
+            msg = (
+                f"🚨 {name_label} ({sym}) en {direction} de {pct:+.2f}% aujourd'hui — "
+                f"dépasse votre seuil de surveillance ({MAJOR_EVENT_THRESHOLD}%)."
+            )
+            log.warning('WATCHLIST EVENT: %s %+.2f%% — alerting user %s', sym, pct, uid)
+            save_alert(uid, sym, msg, alert_type='watchlist_event')
+            if email:
+                send_alert_email(
+                    email,
+                    f"🚨 FinanceAI — {sym} {pct:+.2f}% dans votre watchlist",
+                    msg
+                )
+
 def check_price_alerts():
-    """Vérifie les prix toutes les 5 min pendant les heures de marché."""
+    """Vérifie les prix toutes les 15 min pendant les heures de marché."""
     if not is_market_open():
         return
 
@@ -150,6 +230,53 @@ def check_price_alerts():
                         msg
                     )
                     log.info('Alert sent: %s %+.2f%%', fav['symbol'], data['change_pct'])
+
+def refresh_news_cache():
+    """Récupère les actualités depuis NewsAPI et les stocke dans news_cache (toutes les 30 min)."""
+    NEWS_API_KEY = os.getenv('NEWS_API_KEY', '')
+    if not NEWS_API_KEY:
+        log.warning('NEWS_API_KEY not set — skipping news cache refresh')
+        return
+
+    CATEGORIES = {
+        'all':       'finance OR economy OR markets OR stocks OR crypto OR Canada economy',
+        'politique': 'politics economy policy government Canada USA Federal Reserve Bank of Canada',
+        'economie':  'GDP inflation employment economy Canada USA recession growth',
+        'marches':   'stock market NYSE NASDAQ TSX S&P 500 earnings trading',
+        'banques':   'Federal Reserve Bank of Canada interest rates central bank monetary policy',
+    }
+
+    log.info('Refreshing news cache...')
+    for category, q in CATEGORIES.items():
+        try:
+            url = (
+                f'https://newsapi.org/v2/everything?q={requests.utils.quote(q)}'
+                f'&language=en&sortBy=publishedAt&pageSize=20&apiKey={NEWS_API_KEY}'
+            )
+            r = requests.get(url, timeout=15)
+            if not r.ok:
+                log.warning('NewsAPI error for category %s: %s', category, r.status_code)
+                continue
+
+            articles = r.json().get('articles', [])
+            rows = [
+                {
+                    'category':     category,
+                    'title':        a['title'],
+                    'description':  a.get('description', ''),
+                    'url':          a.get('url', ''),
+                    'source':       a.get('source', {}).get('name', ''),
+                    'published_at': a.get('publishedAt'),
+                    'image':        a.get('urlToImage', ''),
+                }
+                for a in articles
+                if a.get('title') and a['title'] != '[Removed]'
+            ]
+            if rows:
+                SUPABASE.from_('news_cache').insert(rows).execute()
+                log.info('News cache refreshed: %d articles for category "%s"', len(rows), category)
+        except Exception as e:
+            log.error('News cache error for %s: %s', category, e)
 
 def scrape_youtube_rss():
     """Scrappe les RSS YouTube des grands investisseurs."""
@@ -262,7 +389,9 @@ def resolve_predictions():
 
 # ─── Schedule ────────────────────────────────────────────────────────────────
 
-schedule.every(5).minutes.do(check_price_alerts)
+schedule.every(15).minutes.do(check_price_alerts)
+schedule.every(15).minutes.do(check_major_market_events)
+schedule.every(30).minutes.do(refresh_news_cache)
 schedule.every(2).hours.do(scrape_reddit)
 schedule.every(6).hours.do(scrape_youtube_rss)
 schedule.every().day.at('22:00').do(nightly_market_analysis)
@@ -270,7 +399,8 @@ schedule.every().day.at('22:30').do(resolve_predictions)
 
 if __name__ == '__main__':
     log.info('FinanceAI continuous agent started.')
-    # Run all tasks once on startup
+    # Run key tasks once on startup
+    refresh_news_cache()
     scrape_reddit()
     scrape_youtube_rss()
     while True:
