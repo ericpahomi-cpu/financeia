@@ -1,0 +1,44 @@
+name: Weekly FinanceAI Report
+
+on:
+  # Every Friday at 21:00 EST = Saturday 02:00 UTC
+  schedule:
+    - cron: '0 2 * * 6'
+  # Allow manual trigger from GitHub UI
+  workflow_dispatch:
+
+jobs:
+  send-weekly-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: agent/requirements.txt
+
+      - name: Install dependencies
+        working-directory: agent
+        run: pip install -r requirements.txt
+
+      - name: Send weekly report to all clients
+        working-directory: agent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
+          FROM_NAME: ${{ secrets.FROM_NAME }}
+        run: |
+          python - <<'EOF'
+          from email_sender import send_weekly_report_all_clients
+          send_weekly_report_all_clients()
+          print("Weekly report job completed.")
+          EOF
