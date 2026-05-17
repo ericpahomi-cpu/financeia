@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import ReportCard from '@/components/ReportCard';
+import { useLanguage } from '@/lib/language-context';
 
 interface Report {
   id: string;
@@ -26,6 +27,7 @@ interface Prediction {
 type Tab = 'rapports' | 'pronostics';
 
 export default function ReportsPage() {
+  const { t } = useLanguage();
   const [tab, setTab]                   = useState<Tab>('rapports');
   const [reports, setReports]           = useState<Report[]>([]);
   const [predictions, setPredictions]   = useState<Prediction[]>([]);
@@ -69,15 +71,15 @@ export default function ReportsPage() {
       {/* ── Header ────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h1 className="text-2xl font-bold text-[#1a1a1a]">📄 Rapports</h1>
-          <p className="text-[#6b7280] text-sm">Analyses quotidiennes &amp; historique des pronostics</p>
+          <h1 className="text-2xl font-bold text-[#1a1a1a]">📄 {t.reports_title}</h1>
+          <p className="text-[#6b7280] text-sm">{t.reports_subtitle}</p>
         </div>
         <div className="flex gap-2">
           <button className={tabClass('rapports')} onClick={() => setTab('rapports')}>
-            📄 Rapports ({reports.length})
+            📄 {t.tab_reports} ({reports.length})
           </button>
           <button className={tabClass('pronostics')} onClick={() => setTab('pronostics')}>
-            🎯 Pronostics ({predictions.length})
+            🎯 {t.tab_predictions} ({predictions.length})
           </button>
         </div>
       </div>
@@ -97,10 +99,8 @@ export default function ReportsPage() {
           ) : reports.length === 0 ? (
             <div className="bg-white border border-[#e5e7eb] rounded-xl p-12 text-center shadow-sm">
               <p className="text-4xl mb-4">📭</p>
-              <p className="text-[#1a1a1a] font-medium">Aucun rapport disponible</p>
-              <p className="text-[#9ca3af] text-sm mt-2">
-                Les rapports sont générés automatiquement chaque matin à 7h00
-              </p>
+              <p className="text-[#1a1a1a] font-medium">{t.reports_no_reports}</p>
+              <p className="text-[#9ca3af] text-sm mt-2">{t.reports_auto}</p>
             </div>
           ) : (
             <div className="space-y-4">
@@ -126,22 +126,22 @@ export default function ReportsPage() {
                   {accuracy}%
                 </div>
                 <div>
-                  <p className="text-[#1a1a1a] font-semibold text-sm">Taux de précision global</p>
-                  <p className="text-[#6b7280] text-xs">{correct} corrects sur {resolved.length} résolus</p>
+                  <p className="text-[#1a1a1a] font-semibold text-sm">{t.pred_title}</p>
+                  <p className="text-[#6b7280] text-xs">{correct} / {resolved.length}</p>
                 </div>
               </div>
               <div className="flex gap-3 ml-auto text-xs">
                 <div className="text-center">
                   <p className="font-bold text-emerald-600 text-lg">{correct}</p>
-                  <p className="text-[#6b7280]">✅ Corrects</p>
+                  <p className="text-[#6b7280]">✅ {t.pred_correct}</p>
                 </div>
                 <div className="text-center">
                   <p className="font-bold text-red-500 text-lg">{resolved.length - correct}</p>
-                  <p className="text-[#6b7280]">❌ Incorrects</p>
+                  <p className="text-[#6b7280]">❌ {t.pred_wrong}</p>
                 </div>
                 <div className="text-center">
                   <p className="font-bold text-amber-500 text-lg">{predictions.length - resolved.length}</p>
-                  <p className="text-[#6b7280]">⏳ En attente</p>
+                  <p className="text-[#6b7280]">⏳ {t.pred_pending}</p>
                 </div>
               </div>
             </div>
@@ -159,10 +159,8 @@ export default function ReportsPage() {
           ) : predictions.length === 0 ? (
             <div className="bg-white border border-[#e5e7eb] rounded-xl p-12 text-center shadow-sm">
               <p className="text-4xl mb-4">🎯</p>
-              <p className="text-[#1a1a1a] font-medium">Aucun pronostic enregistré</p>
-              <p className="text-[#9ca3af] text-sm mt-2">
-                L&apos;agent génère des pronostics chaque soir à 22h00
-              </p>
+              <p className="text-[#1a1a1a] font-medium">{t.pred_no_preds}</p>
+              <p className="text-[#9ca3af] text-sm mt-2">{t.pred_none}</p>
             </div>
           ) : (
             <div className="space-y-2">
@@ -186,7 +184,7 @@ export default function ReportsPage() {
                       >
                         {dirLabel(p.direction)}
                       </span>
-                      <span className="text-xs text-[#6b7280]">Confiance : {p.confidence}%</span>
+                      <span className="text-xs text-[#6b7280]">{t.pred_confidence} : {p.confidence}%</span>
                     </div>
 
                     {/* Confidence bar */}
@@ -216,7 +214,7 @@ export default function ReportsPage() {
                       </p>
                     )}
                     {p.resolved_at && (
-                      <p className="text-xs text-[#9ca3af]">Résolu {formatDate(p.resolved_at)}</p>
+                      <p className="text-xs text-[#9ca3af]">{t.pred_resolved} {formatDate(p.resolved_at)}</p>
                     )}
                   </div>
                 </div>

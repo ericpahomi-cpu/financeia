@@ -4,23 +4,25 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-
-const navItems = [
-  { href: '/dashboard',             icon: '📊', label: 'Dashboard' },
-  { href: '/dashboard/marches',     icon: '🌍', label: 'Marchés' },
-  { href: '/dashboard/crypto',      icon: '₿',  label: 'Crypto' },
-  { href: '/dashboard/surveiller',  icon: '👁️', label: 'À surveiller' },
-  { href: '/dashboard/actualites',  icon: '📰', label: 'Actualités' },
-  { href: '/dashboard/reports',     icon: '📄', label: 'Rapports' },
-  { href: '/dashboard/chat',        icon: '💬', label: 'Chat IA' },
-  { href: '/dashboard/settings',    icon: '⚙️', label: 'Paramètres' },
-];
+import { useLanguage } from '@/lib/language-context';
 
 export default function Sidebar() {
-  const pathname = usePathname();
-  const router   = useRouter();
+  const pathname  = usePathname();
+  const router    = useRouter();
+  const { t }     = useLanguage();
   const [userName, setUserName]   = useState('');
   const [userEmail, setUserEmail] = useState('');
+
+  const navItems = [
+    { href: '/dashboard',            icon: '📊', label: t.nav_dashboard },
+    { href: '/dashboard/marches',    icon: '🌍', label: t.nav_markets   },
+    { href: '/dashboard/crypto',     icon: '₿',  label: t.nav_crypto    },
+    { href: '/dashboard/surveiller', icon: '👁️', label: t.nav_watchlist },
+    { href: '/dashboard/actualites', icon: '📰', label: t.nav_news      },
+    { href: '/dashboard/reports',    icon: '📄', label: t.nav_reports   },
+    { href: '/dashboard/chat',       icon: '💬', label: t.nav_chat      },
+    { href: '/dashboard/settings',   icon: '⚙️', label: t.nav_settings  },
+  ];
 
   useEffect(() => {
     const supabase = createClient();
@@ -81,9 +83,9 @@ export default function Sidebar() {
           <button onClick={handleLogout}
             className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[#6b7280] hover:bg-red-50 hover:text-red-600 transition-colors text-sm font-medium">
             <span className="text-base w-5 text-center">🚪</span>
-            <span>Déconnexion</span>
+            <span>{t.nav_logout}</span>
           </button>
-          <p className="text-[#d1d5db] text-xs px-2.5 pb-1">Powered by Claude AI</p>
+          <p className="text-[#d1d5db] text-xs px-2.5 pb-1">{t.powered_by}</p>
         </div>
       </aside>
 

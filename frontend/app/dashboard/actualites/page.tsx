@@ -1,41 +1,43 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { useLanguage } from '@/lib/language-context';
 
 interface Article {
   title: string; description: string; url: string;
   source: string; publishedAt: string; image?: string;
 }
 
-const CATEGORIES = [
-  { key: 'all',       label: 'Tout' },
-  { key: 'politique', label: 'Politique' },
-  { key: 'economie',  label: 'Économie' },
-  { key: 'marches',   label: 'Marchés' },
-  { key: 'banques',   label: 'Banques centrales' },
-] as const;
-
-type CategoryKey = typeof CATEGORIES[number]['key'];
+type CategoryKey = 'all' | 'politique' | 'economie' | 'marches' | 'banques';
 
 function timeAgo(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
   const m = Math.floor(diff / 60000);
-  if (m < 60) return `il y a ${m}min`;
+  if (m < 60) return `${m}min`;
   const h = Math.floor(m / 60);
-  if (h < 24) return `il y a ${h}h`;
-  return `il y a ${Math.floor(h / 24)}j`;
+  if (h < 24) return `${h}h`;
+  return `${Math.floor(h / 24)}j`;
 }
 
 export default function ActualitesPage() {
-  const [articles, setArticles]   = useState<Article[]>([]);
-  const [category, setCategory]   = useState<CategoryKey>('all');
-  const [loading, setLoading]     = useState(true);
+  const { t } = useLanguage();
+  const [articles, setArticles] = useState<Article[]>([]);
+  const [category, setCategory] = useState<CategoryKey>('all');
+  const [loading, setLoading]   = useState(true);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const CATEGORIES: { key: CategoryKey; label: string }[] = [
+    { key: 'all',       label: t.news_all      },
+    { key: 'politique', label: t.news_politics },
+    { key: 'economie',  label: t.news_economy  },
+    { key: 'marches',   label: t.news_markets  },
+    { key: 'banques',   label: t.news_banks    },
+  ];
 
   const load = async (cat: CategoryKey) => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/news?category=${cat}`);
+      const res  = await fetch(`/api/news?category=${cat}`);
       const data = await res.json() as { articles: Article[] };
       setArticles(data.articles || []);
     } finally {
@@ -47,18 +49,18 @@ export default function ActualitesPage() {
     load(category);
     intervalRef.current = setInterval(() => load(category), 15 * 60 * 1000);
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [category]);
+  }, [category]); // eslint-disable-line
 
   return (
     <div className="p-4 md:p-6 space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-[#1a1a1a]">📰 Actualités</h1>
-          <p className="text-[#6b7280] text-sm">Finance US et Canada — mise à jour toutes les 15 min</p>
+          <h1 className="text-2xl font-bold text-[#1a1a1a]">📰 {t.news_title}</h1>
+          <p className="text-[#6b7280] text-sm">{t.news_subtitle}</p>
         </div>
         <button onClick={() => load(category)}
           className="px-4 py-2 bg-indigo-50 border border-indigo-100 rounded-lg text-indigo-600 text-sm hover:bg-indigo-100 transition-colors">
-          🔄
+          🔄 {t.refresh}
         </button>
       </div>
 
@@ -101,6 +103,8 @@ export default function ActualitesPage() {
                     <span className="font-medium text-indigo-600">{a.source}</span>
                     <span>•</span>
                     <span>{timeAgo(a.publishedAt)}</span>
+                    <span>•</span>
+                    <span className="text-indigo-500">{t.news_read_more} →</span>
                   </div>
                 </div>
               </div>
@@ -108,7 +112,7 @@ export default function ActualitesPage() {
           ))}
           {articles.length === 0 && (
             <div className="bg-white border border-[#e5e7eb] rounded-xl p-10 text-center">
-              <p className="text-[#9ca3af]">Aucun article disponible pour le moment.</p>
+              <p className="text-[#9ca3af]">{t.news_no_results}</p>
             </div>
           )}
         </div>

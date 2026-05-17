@@ -13,6 +13,14 @@ const supabaseAdmin = createSupabaseAdmin(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+const LANG_NAMES: Record<string, string> = {
+  fr: 'français',
+  en: 'English',
+  es: 'español',
+  ru: 'русский',
+  ro: 'română',
+};
+
 export async function POST(req: NextRequest) {
   try {
     const { message } = await req.json();
@@ -29,25 +37,45 @@ export async function POST(req: NextRequest) {
       return new Response(JSON.stringify({ error: 'Non authentifié' }), { status: 401 });
     }
 
-    const userName = (user.user_metadata?.full_name as string) || user.email?.split('@')[0] || 'Client';
+    const firstName = ((user.user_metadata?.full_name as string) || user.email?.split('@')[0] || 'Client').split(' ')[0];
 
-    // Fetch conversation history for Claude context (before saving new message)
-    const { data: history } = await supabaseAdmin
-      .from('conversations')
-      .select('role, content')
-      .eq('client_id', user.id)
-      .order('created_at', { ascending: true })
-      .limit(50);
+    // Fetch conversation history + user settings in parallel
+    const [{ data: history }, { data: settingsData }] = await Promise.all([
+      supabaseAdmin
+        .from('conversations')
+        .select('role, content')
+        .eq('client_id', user.id)
+        .order('created_at', { ascending: true })
+        .limit(50),
+      supabaseAdmin
+        .from('user_settings')
+        .select('language')
+        .eq('id', user.id)
+        .single(),
+    ]);
 
+    const lang = (settingsData as { language?: string } | null)?.language ?? 'fr';
+    const langLabel = LANG_NAMES[lang] ?? 'français';
     const isFirstConversation = !history || history.length === 0;
 
     const systemPrompt = isFirstConversation
-      ? `Tu es FinanceAI, un conseiller financier personnel expert. C'est la première fois que ${userName} utilise FinanceAI. Commence par te présenter chaleureusement et pose-lui ces 3 questions pour apprendre à le connaître : 1) Quel est son profil de risque (prudent, modéré ou dynamique) ? 2) Quels sont ses actifs ou marchés favoris (actions, crypto, ETF...) ? 3) Quels sont ses objectifs financiers (épargne, retraite, spéculation...) ?
+      ? `Tu es FinanceAI, le conseiller financier personnel de ${firstName}.
 
-Tu cherches toujours les données financières les plus récentes sur le web avant de répondre. Tes réponses sont en français, claires et directes — jamais de markdown, jamais de ##, **, ou *. Tu écris comme un conseiller humain. Maximum 3-4 paragraphes par réponse.`
-      : `Tu es FinanceAI, un conseiller financier personnel expert de ${userName}. Tu te souviens de toutes tes conversations passées avec ce client. Utilise cet historique pour personnaliser tes réponses et appeler le client par son prénom. Tu connais ses préférences, son profil de risque et ses objectifs financiers mentionnés dans les conversations passées.
+RÈGLES ABSOLUES :
+- C'est le tout premier message. Dis juste : Bonjour ${firstName} ! Comment puis-je vous aider ? (une seule phrase)
+- Si le client demande un graphique ou si un graphique aide à comprendre, écris exactement : [CHART:SYMBOLE] — exemple [CHART:AAPL] ou [CHART:BTC-USD]
+- Tu cherches les données financières en temps réel avant de répondre.
+- Tu réponds TOUJOURS en ${langLabel}. Même si le client écrit dans une autre langue.`
+      : `Tu es FinanceAI, le conseiller financier personnel de ${firstName}.
 
-Tu cherches toujours les données financières les plus récentes sur le web avant de répondre. Tes réponses sont en français, claires et directes — jamais de markdown, jamais de ##, **, ou *. Tu écris comme un conseiller humain. Maximum 3-4 paragraphes par réponse. Tu bases tes conseils uniquement sur les données actuelles du marché.`;
+RÈGLES ABSOLUES :
+- Maximum 4-5 phrases par réponse. Jamais plus. Jamais.
+- JAMAIS de présentation ou de "je suis FinanceAI". Tu connais déjà le client.
+- Si le client demande un graphique ou si un graphique aide à expliquer, écris exactement : [CHART:SYMBOLE] — exemple [CHART:AAPL] ou [CHART:SOL-USD]
+- Réponses directes et concises. Zéro phrase inutile.
+- Tu cherches les données en temps réel avant de répondre.
+- Tu réponds TOUJOURS en ${langLabel}. Même si le client écrit dans une autre langue.
+- Tu te souviens de l'historique de conversation avec ce client.`;
 
     const claudeMessages: { role: 'user' | 'assistant'; content: string }[] = [
       ...(history || []).map((m) => ({
@@ -59,7 +87,7 @@ Tu cherches toujours les données financières les plus récentes sur le web ava
 
     const stream = await anthropic.messages.stream({
       model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
+      max_tokens: 512,
       system: systemPrompt,
       tools: [{ type: 'web_search_20250305', name: 'web_search' }],
       messages: claudeMessages,
@@ -89,7 +117,6 @@ Tu cherches toujours les données financières les plus récentes sur le web ava
           controller.error(error);
         } finally {
           controller.close();
-          // Save both messages after stream completes
           if (assistantContent) {
             await supabaseAdmin.from('conversations').insert([
               { client_id: user.id, role: 'user', content: message },

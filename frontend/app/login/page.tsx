@@ -3,23 +3,28 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { useLanguage } from '@/lib/language-context';
+
+type Mode = 'login' | 'signup' | 'forgot';
 
 export default function LoginPage() {
-  const router = useRouter();
+  const router   = useRouter();
   const supabase = createClient();
+  const { t }    = useLanguage();
 
-  const [mode, setMode] = useState<'login' | 'signup'>('login');
-  const [email, setEmail] = useState('');
+  const [mode, setMode]         = useState<Mode>('login');
+  const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
-  const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
+  const [error, setError]       = useState('');
+  const [message, setMessage]   = useState('');
   const [isLoading, setIsLoading] = useState(false);
+
+  const reset = () => { setError(''); setMessage(''); };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
-    setMessage('');
+    reset();
     setIsLoading(true);
 
     try {
@@ -27,12 +32,16 @@ export default function LoginPage() {
         const { error } = await supabase.auth.signUp({
           email,
           password,
-          options: {
-            data: { full_name: fullName },
-          },
+          options: { data: { full_name: fullName } },
         });
         if (error) throw error;
         setMessage('Compte créé ! Vérifiez votre email pour confirmer votre inscription.');
+      } else if (mode === 'forgot') {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: 'https://financeia-weld.vercel.app/auth/callback',
+        });
+        if (error) throw error;
+        setMessage(t.forgot_sent);
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
@@ -40,8 +49,7 @@ export default function LoginPage() {
         router.refresh();
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Une erreur est survenue.';
-      setError(msg);
+      setError(err instanceof Error ? err.message : 'Une erreur est survenue.');
     } finally {
       setIsLoading(false);
     }
@@ -59,32 +67,36 @@ export default function LoginPage() {
             <span className="text-white font-bold text-xl">FA</span>
           </div>
           <h1 className="text-[#1a1a1a] text-2xl font-bold">FinanceAI</h1>
-          <p className="text-[#6b7280] text-sm mt-1">Votre conseiller financier IA personnel</p>
+          <p className="text-[#6b7280] text-sm mt-1">{t.subtitle}</p>
         </div>
 
         {/* Card */}
         <div className="bg-white border border-[#e5e7eb] rounded-xl p-6 shadow-sm">
           <h2 className="text-[#1a1a1a] font-semibold text-lg mb-5">
-            {mode === 'login' ? 'Se connecter' : 'Créer un compte'}
+            {mode === 'login'  ? t.login_title  :
+             mode === 'signup' ? t.signup_title :
+             t.forgot_password}
           </h2>
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Full name — signup only */}
             {mode === 'signup' && (
               <div>
-                <label className="text-[#6b7280] text-xs block mb-1">Prénom et nom</label>
+                <label className="text-[#6b7280] text-xs block mb-1">{t.login_fullname}</label>
                 <input
                   type="text"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   placeholder="Jean Dupont"
-                  required={mode === 'signup'}
+                  required
                   className={inputClass}
                 />
               </div>
             )}
 
+            {/* Email */}
             <div>
-              <label className="text-[#6b7280] text-xs block mb-1">Adresse email</label>
+              <label className="text-[#6b7280] text-xs block mb-1">{t.login_email}</label>
               <input
                 type="email"
                 value={email}
@@ -95,18 +107,21 @@ export default function LoginPage() {
               />
             </div>
 
-            <div>
-              <label className="text-[#6b7280] text-xs block mb-1">Mot de passe</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                required
-                minLength={6}
-                className={inputClass}
-              />
-            </div>
+            {/* Password — login / signup only */}
+            {mode !== 'forgot' && (
+              <div>
+                <label className="text-[#6b7280] text-xs block mb-1">{t.login_password}</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  required
+                  minLength={6}
+                  className={inputClass}
+                />
+              </div>
+            )}
 
             {error && (
               <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-red-600 text-sm">
@@ -125,42 +140,58 @@ export default function LoginPage() {
               disabled={isLoading}
               className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white py-2.5 rounded-lg font-semibold text-sm transition-colors"
             >
-              {isLoading
-                ? 'Chargement...'
-                : mode === 'login'
-                ? 'Se connecter'
-                : 'Créer mon compte'}
+              {isLoading ? t.loading_btn :
+               mode === 'login'  ? t.login_submit  :
+               mode === 'signup' ? t.signup_submit :
+               t.forgot_send}
             </button>
           </form>
 
+          {/* Forgot password link — login mode only */}
+          {mode === 'login' && (
+            <div className="mt-3 text-center">
+              <button
+                onClick={() => { setMode('forgot'); reset(); }}
+                className="text-[#9ca3af] text-xs hover:text-indigo-600 transition-colors"
+              >
+                {t.forgot_password}
+              </button>
+            </div>
+          )}
+
           <div className="mt-5 pt-5 border-t border-[#f3f4f6] text-center">
-            {mode === 'login' ? (
+            {mode === 'forgot' ? (
+              <button
+                onClick={() => { setMode('login'); reset(); }}
+                className="text-indigo-600 font-medium text-sm hover:text-indigo-500"
+              >
+                ← {t.forgot_back}
+              </button>
+            ) : mode === 'login' ? (
               <p className="text-[#6b7280] text-sm">
-                Pas encore de compte ?{' '}
+                {t.login_no_account}{' '}
                 <button
-                  onClick={() => { setMode('signup'); setError(''); setMessage(''); }}
+                  onClick={() => { setMode('signup'); reset(); }}
                   className="text-indigo-600 font-medium hover:text-indigo-500"
                 >
-                  Créer un compte
+                  {t.login_create}
                 </button>
               </p>
             ) : (
               <p className="text-[#6b7280] text-sm">
-                Déjà un compte ?{' '}
+                {t.login_has_account}{' '}
                 <button
-                  onClick={() => { setMode('login'); setError(''); setMessage(''); }}
+                  onClick={() => { setMode('login'); reset(); }}
                   className="text-indigo-600 font-medium hover:text-indigo-500"
                 >
-                  Se connecter
+                  {t.login_connect}
                 </button>
               </p>
             )}
           </div>
         </div>
 
-        <p className="text-center text-[#9ca3af] text-xs mt-6">
-          FinanceAI — Informations à des fins éducatives uniquement.
-        </p>
+        <p className="text-center text-[#9ca3af] text-xs mt-6">{t.disclaimer}</p>
       </div>
     </div>
   );
