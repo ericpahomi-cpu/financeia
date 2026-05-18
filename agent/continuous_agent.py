@@ -250,8 +250,13 @@ def save_prediction(client_id: str | None, asset: str, direction: str,
 def parse_json(text: str) -> dict:
     """Parse Claude's JSON, stripping accidental markdown fences."""
     text = re.sub(r'^```(?:json)?\s*', '', text.strip(), flags=re.MULTILINE)
-    text = re.sub(r'\s*```$',          '', text.strip(), flags=re.MULTILINE)
-    return json.loads(text.strip())
+    text = re.sub(r'\s*```$', '', text.strip(), flags=re.MULTILINE)
+    text = text.strip()
+    # Truncate at last complete closing brace if JSON is cut off
+    last_brace = text.rfind('}')
+    if last_brace != -1:
+        text = text[:last_brace+1]
+    return json.loads(text)
 
 
 # ─── Core intelligence ────────────────────────────────────────────────────────
