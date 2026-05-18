@@ -4,6 +4,8 @@ Claude analyse les marchés et prend ses propres décisions.
 Pas de seuils hardcodés — mémoire persistante, auto-amélioration.
 """
 import os, json, re, time, logging, datetime
+import xml.etree.ElementTree as ET
+from email.utils import parsedate_to_datetime as rss_parse_date
 from zoneinfo import ZoneInfo
 import schedule
 import anthropic
@@ -572,48 +574,269 @@ def resolve_predictions():
 
 # ─── Data collection ──────────────────────────────────────────────────────────
 
+# Trusted financial RSS feeds — no API key required
+RSS_FEEDS = [
+    ('Yahoo Finance',  'https://finance.yahoo.com/news/rssindex'),
+    ('CNBC Markets',   'https://www.cnbc.com/id/100003114/device/rss/rss.html'),
+    ('MarketWatch',    'https://feeds.content.dowjones.io/public/rss/mw_realtimeheadlines'),
+    ('Reuters Biz',    'https://feeds.reuters.com/reuters/businessNews'),
+    ('Reuters Mkts',   'https://feeds.reuters.com/reuters/markets'),
+    ('Seeking Alpha',  'https://seekingalpha.com/market-news/all.xml'),
+]
+
+# NewsAPI — restricted to trusted financial domains only (no cricket, no sport)
+FINANCIAL_DOMAINS = (
+    'reuters.com,cnbc.com,marketwatch.com,bloomberg.com,wsj.com,'
+    'ft.com,seekingalpha.com,thestreet.com,barrons.com,'
+    'businessinsider.com,forbes.com,investopedia.com,benzinga.com'
+)
+
+
+def _parse_rss_date(date_str: str) -> str | None:
+    """Parse RFC 2822 (RSS pubDate) or ISO 8601 → ISO string."""
+    if not date_str:
+        return None
+    try:
+        return rss_parse_date(date_str).isoformat()
+    except Exception:
+        try:
+            return datetime.datetime.fromisoformat(
+                date_str.replace('Z', '+00:00')
+            ).isoformat()
+        except Exception:
+            return None
+
+
+def fetch_rss_feed(source_name: str, url: str, limit: int = 15) -> list[dict]:
+    """Fetch and parse an RSS 2.0 / Atom feed."""
+    try:
+        r = _yf.get(url, timeout=12)
+        if not r.ok:
+            log.warning('RSS %s → %s', source_name, r.status_code)
+            return []
+        root = ET.fromstring(r.content)
+
+        # RSS 2.0
+        items = root.findall('.//item')
+        # Atom fallback
+        if not items:
+            items = root.findall('.//{http://www.w3.org/2005/Atom}entry')
+
+        out = []
+        for item in items[:limit]:
+            A = '{http://www.w3.org/2005/Atom}'
+            title = (item.findtext('title') or item.findtext(f'{A}title') or '').strip()
+            desc  = (item.findtext('description') or item.findtext('summary')
+                     or item.findtext(f'{A}summary') or '').strip()
+            link  = (item.findtext('link') or item.findtext(f'{A}id') or '').strip()
+            pub   = (item.findtext('pubDate') or item.findtext(f'{A}updated') or '').strip()
+
+            # Strip HTML tags from description
+            desc = re.sub(r'<[^>]+>', ' ', desc).strip()[:600]
+
+            if title and link:
+                out.append({
+                    'title':        title,
+                    'description':  desc,
+                    'url':          link,
+                    'source':       source_name,
+                    'published_at': _parse_rss_date(pub),
+                    'image':        '',
+                })
+        return out
+    except Exception as e:
+        log.warning('RSS %s: %s', source_name, e)
+        return []
+
+
+def fetch_newsapi_finance(api_key: str, limit: int = 30) -> list[dict]:
+    """NewsAPI restricted to trusted financial domains — avoids off-topic content."""
+    try:
+        url = (
+            'https://newsapi.org/v2/everything'
+            f'?domains={FINANCIAL_DOMAINS}'
+            '&q=market OR stocks OR Fed OR inflation OR earnings OR economy OR crypto OR rates'
+            '&language=en&sortBy=publishedAt'
+            f'&pageSize={limit}&apiKey={api_key}'
+        )
+        r = requests.get(url, timeout=15)
+        if not r.ok:
+            log.warning('NewsAPI → %s', r.status_code)
+            return []
+        return [
+            {
+                'title':        a['title'],
+                'description':  (a.get('description') or '')[:600],
+                'url':          a.get('url', ''),
+                'source':       a.get('source', {}).get('name', ''),
+                'published_at': a.get('publishedAt'),
+                'image':        a.get('urlToImage', ''),
+            }
+            for a in r.json().get('articles', [])
+            if a.get('title') and a['title'] != '[Removed]' and a.get('url')
+        ]
+    except Exception as e:
+        log.error('NewsAPI fetch: %s', e)
+        return []
+
+
+def claude_classify_articles(articles: list[dict]) -> list[dict]:
+    """
+    Send a batch of articles to Claude.
+    Claude decides relevance and assigns a financial category.
+    Returns only the relevant ones, enriched with 'category'.
+    """
+    if not articles:
+        return []
+
+    numbered = '\n\n'.join(
+        f"{i+1}. [{a['source']}] {a['title']}\n   {a['description'][:200]}"
+        for i, a in enumerate(articles)
+    )
+
+    prompt = f"""Tu es un filtre d'actualités financières. Évalue ces articles.
+
+CRITÈRES D'INCLUSION (au moins un) :
+- Décisions de banques centrales (Fed, BCE, BdC, BoJ) ou données macro clés
+- Résultats trimestriels, guidance, profit warning d'entreprises cotées
+- Fusions, acquisitions, OPA, introductions en bourse
+- Données économiques : inflation, PIB, emploi, PMI, ventes au détail
+- Crises géopolitiques majeures impactant les marchés
+- Mouvements significatifs d'actions, crypto, matières premières, obligations
+- Annonces réglementaires majeures (SEC, AMF, CFTC)
+- Politique commerciale, tarifs douaniers affectant les marchés
+
+REJETER si : sport, divertissement, politique locale, faits divers, santé non-financière.
+
+CATÉGORIES :
+- "marches"   : actions, crypto, ETF, matières premières, earnings, M&A
+- "economie"  : PIB, inflation, emploi, PMI, données macro
+- "banques"   : Fed, BCE, BdC, BoJ, taux directeurs, politique monétaire
+- "politique" : tarifs, réglementation, géopolitique impactant les marchés
+
+ARTICLES :
+{numbered}
+
+Réponds UNIQUEMENT avec ce JSON valide :
+{{
+  "results": [
+    {{"index": 1, "relevant": true,  "category": "marches",  "importance": 8}},
+    {{"index": 2, "relevant": false}},
+    {{"index": 3, "relevant": true,  "category": "banques",  "importance": 9}}
+  ]
+}}"""
+
+    try:
+        resp = ANTHROPIC_CLIENT.messages.create(
+            model='claude-haiku-4-5',
+            max_tokens=1200,
+            system='Tu es un filtre de contenu financier. Réponds UNIQUEMENT en JSON valide.',
+            messages=[{'role': 'user', 'content': prompt}],
+        )
+        data     = parse_json(resp.content[0].text)
+        res_map  = {r['index']: r for r in data.get('results', [])}
+        filtered = []
+        for i, article in enumerate(articles):
+            r = res_map.get(i + 1, {})
+            if r.get('relevant'):
+                article['category']   = r.get('category', 'marches')
+                article['importance'] = r.get('importance', 5)
+                filtered.append(article)
+        return filtered
+    except Exception as e:
+        log.error('Claude classify: %s', e)
+        return []
+
+
 def refresh_news_cache():
-    """Fetch latest news via NewsAPI every 30 min → store in news_cache."""
+    """
+    Every 30 min — collect from trusted financial RSS feeds + NewsAPI,
+    filter with Claude for market relevance, store in news_cache.
+    Articles that can't impact financial markets are rejected entirely.
+    """
+    log.info('▶ Refreshing news cache...')
     NEWS_API_KEY = os.getenv('NEWS_API_KEY', '')
-    if not NEWS_API_KEY:
-        log.warning('NEWS_API_KEY not set — skipping news cache refresh')
+
+    # 1. Collect raw articles from all sources
+    raw: list[dict] = []
+    for name, feed_url in RSS_FEEDS:
+        batch = fetch_rss_feed(name, feed_url)
+        raw.extend(batch)
+        if batch:
+            log.info('  RSS %-18s %d articles', name, len(batch))
+
+    if NEWS_API_KEY:
+        api_batch = fetch_newsapi_finance(NEWS_API_KEY)
+        raw.extend(api_batch)
+        log.info('  NewsAPI              %d articles', len(api_batch))
+    else:
+        log.warning('  NEWS_API_KEY not set — using RSS feeds only')
+
+    # 2. Deduplicate by URL
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for a in raw:
+        if a.get('url') and a['url'] not in seen:
+            seen.add(a['url'])
+            unique.append(a)
+
+    if not unique:
+        log.warning('No articles collected — check feed availability.')
         return
 
-    CATEGORIES = {
-        'all':       'finance OR economy OR markets OR stocks OR crypto',
-        'politique': 'politics economy policy government Canada USA Federal Reserve',
-        'economie':  'GDP inflation employment economy Canada USA recession',
-        'marches':   'stock market NYSE NASDAQ TSX S&P 500 earnings',
-        'banques':   'Federal Reserve Bank of Canada interest rates monetary policy',
-    }
-    log.info('Refreshing news cache...')
-    for category, q in CATEGORIES.items():
-        try:
-            url = (
-                f'https://newsapi.org/v2/everything?q={requests.utils.quote(q)}'
-                f'&language=en&sortBy=publishedAt&pageSize=20&apiKey={NEWS_API_KEY}'
-            )
-            r = requests.get(url, timeout=15)
-            if not r.ok:
-                continue
-            rows = [
-                {
-                    'category':    category,
-                    'title':       a['title'],
-                    'description': a.get('description', ''),
-                    'url':         a.get('url', ''),
-                    'source':      a.get('source', {}).get('name', ''),
-                    'published_at': a.get('publishedAt'),
-                    'image':       a.get('urlToImage', ''),
-                }
-                for a in r.json().get('articles', [])
-                if a.get('title') and a['title'] != '[Removed]'
-            ]
-            if rows:
-                SUPABASE.from_('news_cache').insert(rows).execute()
-                log.info('News cached: %d articles [%s]', len(rows), category)
-        except Exception as e:
-            log.error('News [%s]: %s', category, e)
+    # 3. Skip URLs already cached (last 6 h) to avoid duplicates
+    try:
+        cutoff = (
+            datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=6)
+        ).isoformat()
+        existing = SUPABASE.from_('news_cache').select('url').gte('fetched_at', cutoff).execute()
+        cached_urls = {r['url'] for r in (existing.data or [])}
+        to_classify = [a for a in unique if a['url'] not in cached_urls]
+    except Exception:
+        to_classify = unique
+
+    if not to_classify:
+        log.info('All articles already cached — nothing new.')
+        return
+
+    log.info('  Classifying %d new articles via Claude…', len(to_classify))
+
+    # 4. Claude filters & classifies in batches of 25
+    relevant: list[dict] = []
+    for i in range(0, len(to_classify), 25):
+        batch    = to_classify[i:i + 25]
+        filtered = claude_classify_articles(batch)
+        relevant.extend(filtered)
+        if i + 25 < len(to_classify):
+            time.sleep(1)   # brief pause between batches
+
+    if not relevant:
+        log.warning('No financially relevant articles found this cycle.')
+        return
+
+    # 5. Insert into Supabase
+    rows = [
+        {
+            'category':    a['category'],
+            'title':       a['title'],
+            'description': a.get('description', ''),
+            'url':         a['url'],
+            'source':      a['source'],
+            'published_at': a.get('published_at'),
+            'image':       a.get('image', ''),
+        }
+        for a in relevant
+    ]
+    try:
+        SUPABASE.from_('news_cache').insert(rows).execute()
+        sources = len({a['source'] for a in relevant})
+        log.info(
+            '✓ News cache: %d/%d articles relevant — %d sources — categories: %s',
+            len(rows), len(unique), sources,
+            ', '.join(sorted({a['category'] for a in relevant})),
+        )
+    except Exception as e:
+        log.error('News cache insert: %s', e)
 
 
 def scrape_reddit():
