@@ -7,7 +7,7 @@ const supabaseAdmin = createSupabaseAdmin(
 );
 
 // 2 h — matches agent refresh cycle (30 min) with comfortable buffer
-const CACHE_TTL_MS = 2 * 60 * 60 * 1000;
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 // Valid category keys stored by the agent
 const VALID_CATEGORIES = ['politique', 'economie', 'marches', 'banques'] as const;
