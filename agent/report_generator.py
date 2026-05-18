@@ -34,7 +34,17 @@ def generate_report(data: dict, client_profile: dict) -> dict:
         'es': 'español'
     }
 
-    prompt = f"""Tu es un analyste financier senior. Génère un rapport financier matinal en texte simple et naturel, sans aucun symbole markdown (pas de ##, **, ***, ---, ou puces excessives). Écris comme un conseiller humain qui s'adresse directement à son client.
+    prompt = f"""Tu es un conseiller financier personnel qui parle directement à son client. Ton ton est humain, chaleureux et direct. Tu expliques simplement, sans jargon, comme si tu parlais en face à face.
+
+Utilise uniquement ces titres de sections en majuscules comme séparateurs :
+
+RÉSUMÉ DU JOUR
+ÉTAT DES MARCHÉS
+ACTUALITÉS ET IMPACT
+SENTIMENT DU MARCHÉ
+OPPORTUNITÉS ET RISQUES
+CONSEILS POUR AUJOURD'HUI
+PERSPECTIVES 48-72H
 
 DONNÉES DU MARCHÉ:
 {market_summary}
@@ -49,35 +59,16 @@ ACTUALITÉS DU JOUR:
 {news_summary}
 
 PROFIL CLIENT:
-- Profil de risque: {risk_profile} (conservateur/modéré/agressif)
+- Profil de risque: {risk_profile}
 - Actifs surveillés: {watched_assets}
 - Langue: {language_map.get(language, 'français')}
 
-Rédige le rapport en {language_map.get(language, 'français')} avec ces sections en texte clair (utilise juste le titre de section en majuscules, pas de ## ni de symboles) :
-
-RÉSUMÉ DU JOUR
-(3-4 phrases sur l'essentiel)
-
-ÉTAT DES MARCHÉS
-(Analyse des indices avec contexte)
-
-ACTUALITÉS ET IMPACT
-(Les nouvelles importantes et leur effet sur les investissements)
-
-SENTIMENT DU MARCHÉ
-(Score X/100 et justification en 2-3 phrases)
-
-OPPORTUNITÉS ET RISQUES
-(Basés sur le profil de risque du client)
-
-CONSEILS POUR AUJOURD'HUI
-(Actions concrètes et simples)
-
-PERSPECTIVES 48-72H
-(Ce qu'il faut surveiller)
-
-Sois précis, professionnel et accessible. Pas de jargon inutile.
-À la fin, indique le score de sentiment sous ce format exact: SENTIMENT_SCORE: XX"""
+Règles absolues :
+- Aucun markdown : pas de **, ##, ---, *, puces
+- Parle directement au client : "vos actifs", "vous devriez", "je vous recommande"
+- Explique pourquoi les marchés bougent, pas seulement les chiffres
+- Maximum 500 mots
+- Termine par : SENTIMENT_SCORE: XX"""
 
     response = client.messages.create(
         model="claude-sonnet-4-6",
