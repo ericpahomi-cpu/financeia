@@ -1,8 +1,0 @@
-# Railway / Nixpacks — Python agent
-# providers = ["python"] lets Nixpacks manage Python + pip automatically.
-# Start command is defined in railway.json — do NOT duplicate it here.
-
-providers = ["python"]
-
-[phases.install]
-cmds = ["pip install --no-cache-dir -r requirements.txt"]
