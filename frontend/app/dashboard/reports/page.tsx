@@ -61,9 +61,9 @@ export default function ReportsPage() {
   const formatDate = (iso: string) =>
     new Date(iso).toLocaleDateString(t.locale, { day: '2-digit', month: 'short', year: 'numeric' });
 
-  const tabClass = (t: Tab) =>
+  const tabClass = (tabId: Tab) =>
     `px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-      tab === t ? 'bg-indigo-600 text-white' : 'text-[#6b7280] hover:bg-[#f3f4f6] hover:text-[#1a1a1a]'
+      tab === tabId ? 'bg-indigo-600 text-white' : 'text-[#6b7280] hover:bg-[#f3f4f6] hover:text-[#1a1a1a]'
     }`;
 
   return (

@@ -8,12 +8,12 @@ const admin = createAdmin(
 );
 
 const DEFAULTS = {
-  currency: 'CAD',
-  language: 'fr',
-  risk_profile: 'moderate',
-  level: 'beginner',
+  currency:        'CAD',
+  language:        'fr',
+  risk_profile:    'moderate',
+  level:           'beginner',
   alert_threshold: 5.0,
-  alerts_enabled: true,
+  alerts_enabled:  true,
 };
 
 export async function GET() {
@@ -21,13 +21,18 @@ export async function GET() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json(DEFAULTS, { status: 401 });
 
-  const { data } = await admin
-    .from('user_settings')
-    .select('*')
-    .eq('id', user.id)
+  const { data, error } = await admin
+    .from('user_preferences')
+    .select('currency, language, risk_profile, level, alert_threshold, alerts_enabled')
+    .eq('user_id', user.id)
     .single();
 
-  return NextResponse.json(data || DEFAULTS);
+  if (error && error.code !== 'PGRST116') {
+    // PGRST116 = "no rows" — expected for new users
+    console.error('[user-settings] GET error:', error.message);
+  }
+
+  return NextResponse.json(data ?? DEFAULTS);
 }
 
 export async function PUT(req: NextRequest) {
@@ -37,10 +42,21 @@ export async function PUT(req: NextRequest) {
 
   const body = await req.json();
 
-  const { error } = await admin
-    .from('user_settings')
-    .upsert({ id: user.id, ...body, updated_at: new Date().toISOString() });
+  // Whitelist fields — never let the client inject arbitrary columns
+  const allowed = ['currency', 'language', 'risk_profile', 'level', 'alert_threshold', 'alerts_enabled'];
+  const payload: Record<string, unknown> = { user_id: user.id, updated_at: new Date().toISOString() };
+  for (const key of allowed) {
+    if (key in body) payload[key] = body[key];
+  }
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  const { error } = await admin
+    .from('user_preferences')
+    .upsert(payload, { onConflict: 'user_id' });
+
+  if (error) {
+    console.error('[user-settings] PUT error:', error.message, error.code);
+    return NextResponse.json({ error: error.message }, { status: 400 });
+  }
+
   return NextResponse.json({ success: true });
 }
