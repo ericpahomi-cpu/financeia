@@ -901,6 +901,264 @@ def scrape_youtube_rss():
             log.warning('YouTube %s: %s', name, e)
 
 
+def scrape_investor_signals():
+    """
+    Every 6 h — YouTube RSS for 50 major investor channels (48 h window,
+    Claude-filtered for finance relevance) + SEC EDGAR 13F filings for 7
+    major funds (7-day window). Saves everything to news_cache with
+    category='investisseurs'.
+    """
+    log.info('▶ scrape_investor_signals...')
+
+    INVESTOR_CHANNELS = {
+        'Warren Buffett / Berkshire':  'UCITesRdIBFKBgRMpTBqm5qA',
+        'Cathie Wood / ARK Invest':    'UCRo-vRW4bkwgV5hBPoXhFiQ',
+        'Ray Dalio':                   'UC16nlN5KmgEq1ryoxJf0OAw',
+        "Kevin O'Leary":               'UCcefNTzBMkSOCCkNqcPsOww',
+        'Peter Lynch Fans':            'UCHqSCGFr4hunYXqHkAvyZZQ',
+        'George Soros Foundation':     'UCKGi-d5B3rCMybBSBkSN1YA',
+        'Bill Ackman / Pershing':      'UCK4tQ7OQXe0V2H3KDZW9_cQ',
+        'Michael Burry Fans':          'UCCPZPrPVXFB5pPSXFCHqRuQ',
+        'Chamath Palihapitiya':        'UCbmNph6atAoGfqLoCL_duAg',
+        'Mark Cuban':                  'UCB8-bDPPHmECaHVDMJfZkxw',
+        'Anthony Pompliano':           'UCie4N3xJJTxNOkFNvKgwX8g',
+        'Raoul Pal':                   'UCddiUEpeqJcYeBxX1IVBKvQ',
+        'Jim Cramer / CNBC':           'UCvJJ_dzjViJCoLf5uKUTwoA',
+        'Grayscale':                   'UCBWyKQB4k7YJGP2FxFD1HiA',
+        'Goldman Sachs':               'UC8GDKFEMfFHLSvV3lYe5cGQ',
+        'JP Morgan':                   'UCiyAuFNjXPwvGMhGDnJNx7w',
+        'Morgan Stanley':              'UCaYr5b0RcsQwnSTmQYJLEIQ',
+        'BlackRock':                   'UCb8rHgTGkOO8dL2vu7IUbKQ',
+        'Vanguard':                    'UCDsRcMCONX2GGZf8VNUvhSg',
+        'Fidelity Investments':        'UCiFDjTfKGjMSfGpHpXeVIww',
+        'Bloomberg Markets':           'UCIALMKvObZNtJ6AmdCLP4cQ',
+        'Wall Street Journal':         'UCK7tARlgkvPatKkf7dGzJog',
+        'Financial Times':             'UCijc3BUzaGmU_OsUxbf5vkA',
+        'The Economist':               'UC0p5jTq6Xx_DosDFxVXnWaQ',
+        'Andrei Jikh':                 'UCGy7SkBjcIAgTiwkXEtPnYg',
+        'Graham Stephan':              'UCV6KDgJskWaEckne5aPA0aQ',
+        'Meet Kevin':                  'UCUvvj5jDVeaRqYmyxMTiCLA',
+        'Minority Mindset':            'UCT3EznhW_CNFcfOlyDNTLLQ',
+        'Patrick Boyle':               'UCASM3gHNHWBzKEVSMhK7hpQ',
+        'Aswath Damodaran':            'UCLvnJL8htRR1T9cbpccmghQ',
+        'Jeremy Siegel Fans':          'UCBmGntH0gYBRHFDENgmyC4Q',
+        'Nouriel Roubini':             'UCgDDq7HkgHIQ2rNuXN0YWEQ',
+        'Mohamed El-Erian':            'UCrM4ZJPiCHQJFJvTfP8NKZQ',
+        'Scott Galloway':              'UCt_X7FVhXDBEhJHMByeXrXg',
+        'Barry Ritholtz':              'UCGrFv-yTPNANOJnmU2FUkGQ',
+        'Howard Marks / Oaktree':      'UCmP2bSCMCKFPFKcHqKHRbJQ',
+        'David Einhorn':               'UCBpZ2hmNHGSHOiWtaFJxlCQ',
+        'Carl Icahn':                  'UCKbGZpNIFEQONHyQ2FkNxKQ',
+        'Dan Loeb / Third Point':      'UCYx2NKGaBqGBkNYbPW2BVKQ',
+        'Nelson Peltz / Trian':        'UCHx4xBnMJLkFkMnEXzHE2PQ',
+        'Steve Cohen / Point72':       'UCqMGJLkFkMnEXzHE2PQHX4Q',
+        'Ken Griffin / Citadel':       'UCLkFkMnEXzHE2PQHX4xBnMQ',
+        'Paul Tudor Jones':            'UCNKGaBqGBkNYbPW2BVKQYx2Q',
+        'Stanley Druckenmiller':       'UCBkNYbPW2BVKQYx2NKGaBqGQ',
+        'Leon Cooperman':              'UCbPW2BVKQYx2NKGaBqGBkNYQ',
+        'David Tepper':                'UCW2BVKQYx2NKGaBqGBkNYbPQ',
+        'Seth Klarman':                'UCYx2NKGaBqGBkNYbPW2BVKQQ',
+        'Joel Greenblatt':             'UCx2NKGaBqGBkNYbPW2BVKQ2Q',
+        'Mohnish Pabrai':              'UC2NKGaBqGBkNYbPW2BVKQYxQ',
+        'Guy Spier':                   'UCNKGaBqGBkNYbPW2BVKQYx3Q',
+    }
+
+    SEC_FUNDS = {
+        'Berkshire Hathaway': '0001067983',
+        'ARK Invest':         '0001697748',
+        'Pershing Square':    '0001336528',
+        'Bridgewater':        '0001350694',
+        'Point72':            '0001603466',
+        'Citadel':            '0001423689',
+        'Third Point':        '0001040273',
+    }
+
+    now_utc     = datetime.datetime.now(datetime.timezone.utc)
+    cutoff_48h  = now_utc - datetime.timedelta(hours=48)
+    cutoff_7d   = now_utc - datetime.timedelta(days=7)
+    cache_since = (now_utc - datetime.timedelta(hours=72)).isoformat()
+
+    # ── Fetch already-cached URLs to avoid duplicates ─────────────────────────
+    try:
+        existing    = SUPABASE.from_('news_cache').select('url').gte('fetched_at', cache_since).execute()
+        cached_urls = {r['url'] for r in (existing.data or [])}
+    except Exception:
+        cached_urls = set()
+
+    # ── 1. YouTube RSS ────────────────────────────────────────────────────────
+    yt_items: list[dict] = []
+    ns_atom = 'http://www.w3.org/2005/Atom'
+
+    for name, channel_id in INVESTOR_CHANNELS.items():
+        try:
+            r = requests.get(
+                f'https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}',
+                headers={'User-Agent': UA}, timeout=10,
+            )
+            if not r.ok:
+                continue
+            root = ET.fromstring(r.text)
+            for entry in root.findall(f'{{{ns_atom}}}entry'):
+                title_el = entry.find(f'{{{ns_atom}}}title')
+                link_el  = entry.find(f'{{{ns_atom}}}link')
+                pub_el   = entry.find(f'{{{ns_atom}}}published')
+                if title_el is None or link_el is None or pub_el is None:
+                    continue
+                title = (title_el.text or '').strip()
+                url   = link_el.get('href', '')
+                pub   = (pub_el.text or '').strip()
+                if not url or url in cached_urls:
+                    continue
+                try:
+                    pub_dt = datetime.datetime.fromisoformat(pub.replace('Z', '+00:00'))
+                    if pub_dt < cutoff_48h:
+                        continue
+                except Exception:
+                    continue
+                yt_items.append({
+                    'title':        title,
+                    'url':          url,
+                    'published_at': pub_dt.isoformat(),
+                    'source':       name,
+                    'description':  f'Nouvelle vidéo de {name}',
+                })
+        except Exception as e:
+            log.warning('YT investor [%s]: %s', name[:30], e)
+
+    log.info('  YouTube investor items (48h window): %d raw', len(yt_items))
+
+    # Filter with Claude — batch all titles in one call
+    finance_yt: list[dict] = []
+    if yt_items:
+        try:
+            numbered = '\n'.join(
+                f'{i}. [{item["source"]}] {item["title"]}'
+                for i, item in enumerate(yt_items)
+            )
+            resp = ANTHROPIC_CLIENT.messages.create(
+                model='claude-haiku-4-5',
+                max_tokens=512,
+                messages=[{
+                    'role': 'user',
+                    'content': (
+                        'Voici des titres de vidéos YouTube de grands investisseurs.\n'
+                        'Garde UNIQUEMENT ceux qui parlent de marchés financiers, économie, '
+                        'actions, crypto, Fed, taux, résultats d\'entreprises ou stratégies '
+                        'd\'investissement. Rejette les vlogs personnels et tout contenu sans '
+                        'rapport financier direct.\n'
+                        'Réponds UNIQUEMENT avec un tableau JSON des indices à garder, ex: [0,2,4]\n\n'
+                        f'TITRES:\n{numbered}'
+                    ),
+                }],
+            )
+            raw_idx = resp.content[0].text.strip()
+            raw_idx = re.sub(r'^```(?:json)?\s*', '', raw_idx, flags=re.MULTILINE)
+            raw_idx = re.sub(r'\s*```$', '', raw_idx, flags=re.MULTILINE).strip()
+            last_br = raw_idx.rfind(']')
+            if last_br != -1:
+                raw_idx = raw_idx[:last_br + 1]
+            indices     = json.loads(raw_idx)
+            finance_yt  = [yt_items[i] for i in indices if isinstance(i, int) and 0 <= i < len(yt_items)]
+            log.info('  Claude kept %d/%d YT items as finance-relevant', len(finance_yt), len(yt_items))
+        except Exception as e:
+            log.warning('  YT Claude filter error: %s — keeping all', e)
+            finance_yt = yt_items
+
+    # ── 2. SEC EDGAR 13F filings ──────────────────────────────────────────────
+    FILING_LABELS = {
+        '13F-HR':   'rapport de positions 13F',
+        '13F-HR/A': 'amendement 13F',
+        'SC 13D':   'déclaration de participation significative (SC 13D)',
+        'SC 13G':   'déclaration de participation passive (SC 13G)',
+        'SC 13G/A': 'amendement SC 13G',
+    }
+    TARGET_FORMS = set(FILING_LABELS)
+    sec_items: list[dict] = []
+
+    for fund_name, cik_raw in SEC_FUNDS.items():
+        try:
+            # SEC expects zero-padded 10-digit CIK in the URL
+            cik_int    = int(cik_raw)
+            cik_padded = str(cik_int).zfill(10)
+            url        = f'https://data.sec.gov/submissions/CIK{cik_padded}.json'
+            r = requests.get(
+                url,
+                headers={'User-Agent': 'FinanceAI contact@financeai.com'},
+                timeout=15,
+            )
+            if not r.ok:
+                log.warning('  SEC %s: HTTP %s', fund_name, r.status_code)
+                continue
+            data       = r.json()
+            recent     = data.get('filings', {}).get('recent', {})
+            forms      = recent.get('form', [])
+            dates      = recent.get('filingDate', [])
+            accessions = recent.get('accessionNumber', [])
+
+            for form, date_str, accession in zip(forms, dates, accessions):
+                if form not in TARGET_FORMS:
+                    continue
+                try:
+                    filing_dt = datetime.datetime.fromisoformat(date_str).replace(
+                        tzinfo=datetime.timezone.utc
+                    )
+                    if filing_dt < cutoff_7d:
+                        continue
+                except Exception:
+                    continue
+                # Build EDGAR viewer URL
+                acc_clean   = accession.replace('-', '')
+                filing_url  = (
+                    f'https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany'
+                    f'&CIK={cik_int}&type={form}&dateb=&owner=include&count=5'
+                )
+                if filing_url in cached_urls:
+                    continue
+                label = FILING_LABELS.get(form, form)
+                title = (
+                    f'{fund_name} a déposé un {label} — '
+                    f'nouveaux mouvements sur ses positions'
+                )
+                sec_items.append({
+                    'title':        title,
+                    'url':          filing_url,
+                    'published_at': filing_dt.isoformat(),
+                    'source':       'SEC Filing',
+                    'description':  f'Filing {form} déposé le {date_str} par {fund_name}.',
+                })
+        except Exception as e:
+            log.warning('  SEC %s: %s', fund_name, e)
+
+    log.info('  SEC filings (7d window): %d new', len(sec_items))
+
+    # ── 3. Insert everything into news_cache ──────────────────────────────────
+    all_items = finance_yt + sec_items
+    if not all_items:
+        log.info('  No investor signals to insert this cycle.')
+        return
+
+    rows = [
+        {
+            'category':    'investisseurs',
+            'title':       item['title'],
+            'description': item.get('description', ''),
+            'url':         item['url'],
+            'source':      item['source'],
+            'published_at': item.get('published_at'),
+            'image':       '',
+        }
+        for item in all_items
+    ]
+    try:
+        SUPABASE.from_('news_cache').insert(rows).execute()
+        log.info(
+            '✓ Investor signals inserted: %d total (YT:%d SEC:%d)',
+            len(rows), len(finance_yt), len(sec_items),
+        )
+    except Exception as e:
+        log.error('Investor signals insert: %s', e)
+
+
 def send_daily_reports():
     now = datetime.datetime.now(EST)
     weekday = now.weekday()  # 0=lundi, 5=samedi
@@ -953,6 +1211,7 @@ schedule.every(15).minutes.do(autonomous_market_scan)
 schedule.every(30).minutes.do(refresh_news_cache)
 schedule.every(2).hours.do(scrape_reddit)
 schedule.every(6).hours.do(scrape_youtube_rss)
+schedule.every(6).hours.do(scrape_investor_signals)
 schedule.every().day.at('07:00').do(send_daily_reports)
 schedule.every().friday.at('07:00').do(send_weekly_report_all_clients)
 schedule.every().day.at('22:00').do(deep_nightly_analysis)

@@ -8,7 +8,7 @@ interface Article {
   source: string; publishedAt: string; image?: string;
 }
 
-type CategoryKey = 'all' | 'politique' | 'economie' | 'marches' | 'banques';
+type CategoryKey = 'all' | 'politique' | 'economie' | 'marches' | 'banques' | 'investisseurs';
 
 function timeAgo(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
@@ -27,11 +27,12 @@ export default function ActualitesPage() {
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const CATEGORIES: { key: CategoryKey; label: string }[] = [
-    { key: 'all',       label: t.news_all      },
-    { key: 'politique', label: t.news_politics },
-    { key: 'economie',  label: t.news_economy  },
-    { key: 'marches',   label: t.news_markets  },
-    { key: 'banques',   label: t.news_banks    },
+    { key: 'all',           label: t.news_all       },
+    { key: 'politique',     label: t.news_politics  },
+    { key: 'economie',      label: t.news_economy   },
+    { key: 'marches',       label: t.news_markets   },
+    { key: 'banques',       label: t.news_banks     },
+    { key: 'investisseurs', label: t.news_investors },
   ];
 
   const load = async (cat: CategoryKey) => {

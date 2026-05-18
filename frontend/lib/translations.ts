@@ -89,6 +89,7 @@ const tr = {
     news_economy:  'Économie',
     news_markets:  'Marchés',
     news_banks:    'Banques centrales',
+    news_investors:  'Investisseurs',
     news_no_results: 'Aucune actualité disponible',
     news_read_more:  'Lire la suite',
 
@@ -263,6 +264,7 @@ const tr = {
     news_economy:  'Economy',
     news_markets:  'Markets',
     news_banks:    'Central Banks',
+    news_investors:  'Investors',
     news_no_results: 'No news available',
     news_read_more:  'Read more',
 
@@ -431,6 +433,7 @@ const tr = {
     news_economy:  'Economía',
     news_markets:  'Mercados',
     news_banks:    'Bancos centrales',
+    news_investors:  'Inversores',
     news_no_results: 'Sin noticias disponibles',
     news_read_more:  'Leer más',
 
@@ -599,6 +602,7 @@ const tr = {
     news_economy:  'Экономика',
     news_markets:  'Рынки',
     news_banks:    'Центробанки',
+    news_investors:  'Инвесторы',
     news_no_results: 'Новостей нет',
     news_read_more:  'Читать далее',
 
@@ -767,6 +771,7 @@ const tr = {
     news_economy:  'Economie',
     news_markets:  'Piețe',
     news_banks:    'Bănci centrale',
+    news_investors:  'Investitori',
     news_no_results: 'Nicio știre disponibilă',
     news_read_more:  'Citiți mai mult',
 

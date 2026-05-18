@@ -10,7 +10,7 @@ const supabaseAdmin = createSupabaseAdmin(
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 // Valid category keys stored by the agent
-const VALID_CATEGORIES = ['politique', 'economie', 'marches', 'banques'] as const;
+const VALID_CATEGORIES = ['politique', 'economie', 'marches', 'banques', 'investisseurs'] as const;
 type Category = typeof VALID_CATEGORIES[number] | 'all';
 
 export async function GET(req: NextRequest) {
