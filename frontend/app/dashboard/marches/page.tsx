@@ -75,11 +75,11 @@ export default function MarchesPage() {
     if (isFav) {
       next.delete(stock.symbol);
       await fetch('/api/favorites', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: stock.symbol }) });
-      setToast('❌ Retiré des favoris');
+      setToast(t.fav_removed);
     } else {
       next.add(stock.symbol);
       await fetch('/api/favorites', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: stock.symbol, type: 'stock', name: stock.name }) });
-      setToast('⭐ Ajouté aux favoris');
+      setToast(t.fav_added);
     }
     setFavorites(next);
   };
@@ -90,7 +90,7 @@ export default function MarchesPage() {
     let cur   = q.currency;
     if (currency === 'CAD' && q.currency === 'USD') { price *= usdcad; cur = 'CAD'; }
     if (currency === 'USD' && q.currency === 'CAD') { price /= usdcad; cur = 'USD'; }
-    return `${price.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${cur}`;
+    return `${price.toLocaleString(t.locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${cur}`;
   };
 
   const stocksToShow = search
@@ -143,8 +143,8 @@ export default function MarchesPage() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-[#e5e7eb] bg-[#f8f9fa]">
-              <th className="px-4 py-3 text-left text-[#6b7280] font-medium">Symbole</th>
-              <th className="px-4 py-3 text-left text-[#6b7280] font-medium hidden sm:table-cell">Nom</th>
+              <th className="px-4 py-3 text-left text-[#6b7280] font-medium">{t.column_symbol}</th>
+              <th className="px-4 py-3 text-left text-[#6b7280] font-medium hidden sm:table-cell">{t.column_name}</th>
               <th className="px-4 py-3 text-right text-[#6b7280] font-medium">{t.markets_price}</th>
               <th className="px-4 py-3 text-right text-[#6b7280] font-medium">{t.markets_change}</th>
               <th className="px-4 py-3 text-center text-[#6b7280] font-medium w-12">★</th>

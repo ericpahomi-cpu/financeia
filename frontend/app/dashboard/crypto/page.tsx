@@ -44,11 +44,11 @@ export default function CryptoPage() {
     if (isFav) {
       next.delete(coin.symbol);
       await fetch('/api/favorites', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: coin.symbol }) });
-      setToast('❌ Retiré des favoris');
+      setToast(t.fav_removed);
     } else {
       next.add(coin.symbol);
       await fetch('/api/favorites', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: coin.symbol, type: 'crypto', name: coin.name }) });
-      setToast('⭐ Ajouté aux favoris');
+      setToast(t.fav_added);
     }
     setFavorites(next);
   };
@@ -57,7 +57,7 @@ export default function CryptoPage() {
     !search || c.name.toLowerCase().includes(search.toLowerCase()) || c.symbol.toLowerCase().includes(search.toLowerCase())
   );
 
-  const fmt = (n: number) => n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: n > 1 ? 2 : 6 });
+  const fmt = (n: number) => n.toLocaleString(t.locale, { minimumFractionDigits: 2, maximumFractionDigits: n > 1 ? 2 : 6 });
 
   return (
     <div className="p-4 md:p-6 space-y-5">
@@ -97,7 +97,7 @@ export default function CryptoPage() {
             <thead>
               <tr className="border-b border-[#e5e7eb] bg-[#f8f9fa]">
                 <th className="px-4 py-3 text-left text-[#6b7280] font-medium">{t.crypto_rank}</th>
-                <th className="px-4 py-3 text-left text-[#6b7280] font-medium">Crypto</th>
+                <th className="px-4 py-3 text-left text-[#6b7280] font-medium">{t.column_name}</th>
                 <th className="px-4 py-3 text-right text-[#6b7280] font-medium">{t.crypto_price}</th>
                 <th className="px-4 py-3 text-right text-[#6b7280] font-medium">{t.crypto_change}</th>
                 <th className="px-4 py-3 text-right text-[#6b7280] font-medium hidden md:table-cell">{t.crypto_volume}</th>

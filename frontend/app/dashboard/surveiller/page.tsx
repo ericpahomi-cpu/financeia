@@ -56,7 +56,7 @@ export default function SurveillerPage() {
       setCached(data.cached);
       if (data.error) setError(data.error);
     } catch {
-      setError('Impossible de charger la liste');
+      setError(t.watchlist_error_load);
     } finally {
       setLoading(false);
     }
@@ -86,7 +86,7 @@ export default function SurveillerPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ symbol: item.symbol }),
         });
-        setToast('❌ Retiré des favoris');
+        setToast(t.fav_removed);
       } else {
         next.add(item.symbol);
         setSaved(next);
@@ -95,12 +95,12 @@ export default function SurveillerPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ symbol: item.symbol, name: item.name, type: item.type }),
         });
-        setToast('⭐ Ajouté aux favoris');
+        setToast(t.fav_added);
       }
     } catch {
       // Revert on error
       setSaved(saved);
-      setToast('Erreur — réessayez');
+      setToast(`${t.error} — ${t.retry}`);
     } finally {
       setSavingSymbol(null);
     }
@@ -161,7 +161,7 @@ export default function SurveillerPage() {
       {saved.size > 0 && (
         <div className="bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3 flex items-center gap-2 text-sm text-indigo-700">
           <span>⭐</span>
-          <span><strong>{saved.size}</strong> actif{saved.size > 1 ? 's' : ''} dans votre watchlist — l&apos;agent les surveille 24h/24</span>
+          <span><strong>{saved.size}</strong> {t.watchlist_monitored}</span>
         </div>
       )}
 
@@ -209,7 +209,7 @@ export default function SurveillerPage() {
                             ? 'text-amber-400 scale-110 hover:text-amber-500'
                             : 'text-[#d1d5db] hover:text-amber-300'
                       }`}
-                      title={isSaved ? 'Retirer de la watchlist' : 'Ajouter à la watchlist'}
+                      title={isSaved ? t.remove : t.add}
                     >
                       ★
                     </button>
@@ -260,7 +260,7 @@ export default function SurveillerPage() {
                       : 'bg-[#f8f9fa] border-[#e5e7eb] text-[#6b7280] hover:border-indigo-200 hover:text-indigo-600'
                   }`}
                 >
-                  {saved.has(selected.symbol) ? '★ Sauvegardé' : '☆ Sauvegarder'}
+                  {saved.has(selected.symbol) ? t.watchlist_saved_label : t.watchlist_save}
                 </button>
                 <button onClick={() => setSelected(null)} className="text-[#9ca3af] hover:text-[#6b7280] text-2xl leading-none">&times;</button>
               </div>

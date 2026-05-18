@@ -56,10 +56,10 @@ export default function ReportsPage() {
   const dirColor = (d: string) =>
     d === 'hausse' ? '#10b981' : d === 'baisse' ? '#ef4444' : '#f59e0b';
   const dirLabel = (d: string) =>
-    d === 'hausse' ? '▲ Hausse' : d === 'baisse' ? '▼ Baisse' : '◆ Neutre';
+    d === 'hausse' ? t.dir_up : d === 'baisse' ? t.dir_down : t.dir_neutral;
 
   const formatDate = (iso: string) =>
-    new Date(iso).toLocaleDateString('fr-CA', { day: '2-digit', month: 'short', year: 'numeric' });
+    new Date(iso).toLocaleDateString(t.locale, { day: '2-digit', month: 'short', year: 'numeric' });
 
   const tabClass = (t: Tab) =>
     `px-4 py-2 rounded-lg text-sm font-medium transition-colors ${

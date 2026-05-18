@@ -7,6 +7,7 @@ import SentimentScore from '@/components/SentimentScore';
 import AlertBanner from '@/components/AlertBanner';
 import ReportCard from '@/components/ReportCard';
 import { toTVSymbol } from '@/lib/tv-symbol';
+import { useLanguage } from '@/lib/language-context';
 
 const TradingViewWidget = dynamic(() => import('@/components/TradingViewWidget'), { ssr: false });
 
@@ -19,6 +20,7 @@ interface Portfolio { symbol: string; quantity: number; purchase_price: number; 
 interface Selected { symbol: string; name: string; type: 'stock' | 'crypto'; }
 
 export default function DashboardPage() {
+  const { t } = useLanguage();
   const [latestReport, setLatestReport] = useState<Report | null>(null);
   const [alerts, setAlerts]             = useState<Alert[]>([]);
   const [favorites, setFavorites]       = useState<Favorite[]>([]);
@@ -29,7 +31,7 @@ export default function DashboardPage() {
   const [currency, setCurrency]         = useState<'CAD' | 'USD'>('CAD');
   const [usdcad, setUsdcad]             = useState(1.36);
 
-  useEffect(() => { fetchAll(); }, []);
+  useEffect(() => { fetchAll(); }, []); // eslint-disable-line
 
   const fetchAll = async () => {
     try {
@@ -57,8 +59,7 @@ export default function DashboardPage() {
         const favs: Favorite[] = d.favorites || [];
         setFavorites(favs);
 
-        // Fetch quotes for stock favorites
-        const stocks = favs.filter((f) => f.type === 'stock').map((f) => f.symbol).join(',');
+        const stocks  = favs.filter((f) => f.type === 'stock').map((f) => f.symbol).join(',');
         const cryptos = favs.filter((f) => f.type === 'crypto');
 
         if (stocks) {
@@ -66,7 +67,7 @@ export default function DashboardPage() {
             fetch(`/api/markets?symbols=${encodeURIComponent(stocks)}`),
             fetch('/api/markets?symbols=USDCAD%3DX'),
           ]);
-          const qData = await qRes.json();
+          const qData    = await qRes.json();
           const rateData = await rateRes.json();
           if (rateData.quotes?.[0]) setUsdcad(rateData.quotes[0].price);
           const map: Record<string, FavQuote> = {};
@@ -74,11 +75,11 @@ export default function DashboardPage() {
           setFavQuotes((prev) => ({ ...prev, ...map }));
         }
         if (cryptos.length > 0) {
-          const cRes = await fetch(`/api/crypto?currency=${currency.toLowerCase()}`);
+          const cRes  = await fetch(`/api/crypto?currency=${currency.toLowerCase()}`);
           const cData = await cRes.json();
           const map: Record<string, FavQuote> = {};
           (cData.coins || []).forEach((c: { symbol: string; name: string; price: number; changePct: number }) => {
-            map[c.symbol] = { symbol: c.symbol, name: c.name, price: c.price, changePct: c.changePct, currency: currency };
+            map[c.symbol] = { symbol: c.symbol, name: c.name, price: c.price, changePct: c.changePct, currency };
           });
           setFavQuotes((prev) => ({ ...prev, ...map }));
         }
@@ -91,15 +92,14 @@ export default function DashboardPage() {
     let price = q.price;
     if (currency === 'CAD' && q.currency === 'USD') price *= usdcad;
     if (currency === 'USD' && q.currency === 'CAD') price /= usdcad;
-    return price.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return price.toLocaleString(t.locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
 
   const pnl = (fav: Favorite) => {
     const p = portfolio[fav.symbol];
     const q = favQuotes[fav.symbol];
     if (!p || !q || !p.quantity || !p.purchase_price) return null;
-    const cur = q.price;
-    const val = cur * p.quantity;
+    const val  = q.price * p.quantity;
     const cost = p.purchase_price * p.quantity;
     const gain = val - cost;
     const pct  = (gain / cost) * 100;
@@ -113,9 +113,9 @@ export default function DashboardPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-[#1a1a1a]">Dashboard</h1>
+          <h1 className="text-2xl font-bold text-[#1a1a1a]">{t.dashboard_title}</h1>
           <p className="text-[#6b7280] text-sm">
-            {new Date().toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+            {new Date().toLocaleDateString(t.locale, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -143,26 +143,32 @@ export default function DashboardPage() {
         </div>
         <div className="md:col-span-2 grid grid-cols-2 gap-4">
           <div className="bg-white border border-[#e5e7eb] rounded-xl p-4 shadow-sm">
-            <p className="text-[#6b7280] text-sm">Favoris</p>
+            <p className="text-[#6b7280] text-sm">{t.stats_favorites}</p>
             <p className="text-[#1a1a1a] text-3xl font-bold mt-1">{favorites.length}</p>
             <Link href="/dashboard/marches" className="text-indigo-500 text-xs mt-1 block hover:text-indigo-600">
-              Gérer →
+              {t.stats_manage}
             </Link>
           </div>
           <div className="bg-white border border-[#e5e7eb] rounded-xl p-4 shadow-sm">
-            <p className="text-[#6b7280] text-sm">Alertes actives</p>
+            <p className="text-[#6b7280] text-sm">{t.stats_alerts_active}</p>
             <p className={`text-3xl font-bold mt-1 ${alerts.length > 0 ? 'text-amber-500' : 'text-emerald-600'}`}>{alerts.length}</p>
-            <p className="text-[#9ca3af] text-xs mt-1">{alerts.length > 0 ? 'Requiert attention' : 'Tout est calme'}</p>
+            <p className="text-[#9ca3af] text-xs mt-1">
+              {alerts.length > 0 ? t.alerts_needs_attention : t.alerts_all_calm}
+            </p>
           </div>
           <div className="bg-white border border-[#e5e7eb] rounded-xl p-4 shadow-sm bg-gradient-to-br from-indigo-50 to-purple-50 border-indigo-100">
-            <p className="text-[#6b7280] text-sm">Prochain rapport</p>
+            <p className="text-[#6b7280] text-sm">{t.stats_next_report}</p>
             <p className="text-[#1a1a1a] text-lg font-bold mt-1">07:00 AM</p>
-            <Link href="/dashboard/chat" className="text-indigo-600 text-xs mt-1 hover:text-indigo-500 block">💬 Poser une question →</Link>
+            <Link href="/dashboard/chat" className="text-indigo-600 text-xs mt-1 hover:text-indigo-500 block">
+              💬 {t.chat_ask}
+            </Link>
           </div>
           <div className="bg-white border border-[#e5e7eb] rounded-xl p-4 shadow-sm">
-            <p className="text-[#6b7280] text-sm">À surveiller</p>
+            <p className="text-[#6b7280] text-sm">{t.stats_watchlist_label}</p>
             <p className="text-[#1a1a1a] text-3xl font-bold mt-1">IA</p>
-            <Link href="/dashboard/surveiller" className="text-indigo-500 text-xs mt-1 block hover:text-indigo-600">Voir analyse →</Link>
+            <Link href="/dashboard/surveiller" className="text-indigo-500 text-xs mt-1 block hover:text-indigo-600">
+              {t.see_analysis}
+            </Link>
           </div>
         </div>
       </div>
@@ -170,8 +176,10 @@ export default function DashboardPage() {
       {/* Favorites */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-[#1a1a1a] font-semibold">⭐ Mes favoris</h2>
-          <Link href="/dashboard/marches" className="text-indigo-600 text-sm hover:text-indigo-500">Ajouter →</Link>
+          <h2 className="text-[#1a1a1a] font-semibold">⭐ {t.my_favorites}</h2>
+          <Link href="/dashboard/marches" className="text-indigo-600 text-sm hover:text-indigo-500">
+            {t.add_to_favorites}
+          </Link>
         </div>
 
         {isLoading ? (
@@ -181,19 +189,23 @@ export default function DashboardPage() {
         ) : favorites.length === 0 ? (
           <div className="bg-white border border-[#e5e7eb] rounded-xl p-10 text-center shadow-sm">
             <p className="text-3xl mb-3">⭐</p>
-            <p className="text-[#1a1a1a] font-medium">Aucun favori pour l&apos;instant</p>
-            <p className="text-[#9ca3af] text-sm mt-1">Ajoutez des actions dans la page Marchés ou Crypto</p>
+            <p className="text-[#1a1a1a] font-medium">{t.favorites_empty_title}</p>
+            <p className="text-[#9ca3af] text-sm mt-1">{t.favorites_empty_sub}</p>
             <div className="flex gap-2 justify-center mt-4">
-              <Link href="/dashboard/marches" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm">🌍 Marchés</Link>
-              <Link href="/dashboard/crypto"  className="px-4 py-2 bg-white border border-[#e5e7eb] text-[#1a1a1a] rounded-lg text-sm">₿ Crypto</Link>
+              <Link href="/dashboard/marches" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm">
+                🌍 {t.nav_markets}
+              </Link>
+              <Link href="/dashboard/crypto" className="px-4 py-2 bg-white border border-[#e5e7eb] text-[#1a1a1a] rounded-lg text-sm">
+                ₿ {t.nav_crypto}
+              </Link>
             </div>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {favorites.map((fav) => {
-              const q = favQuotes[fav.symbol];
+              const q    = favQuotes[fav.symbol];
               const isUp = (q?.changePct ?? 0) >= 0;
-              const pl = pnl(fav);
+              const pl   = pnl(fav);
               return (
                 <div key={fav.symbol}
                   onClick={() => setSelected({ symbol: fav.symbol, name: fav.name, type: fav.type })}
@@ -211,7 +223,7 @@ export default function DashboardPage() {
                     {q ? `${displayPrice(q)} ${currency}` : '—'}
                   </p>
                   <p className={`text-sm font-semibold mt-0.5 ${isUp ? 'text-emerald-600' : 'text-red-500'}`}>
-                    {q ? `${isUp ? '+' : ''}${q.changePct.toFixed(2)}% aujourd'hui` : '—'}
+                    {q ? `${isUp ? '+' : ''}${q.changePct.toFixed(2)}% ${t.today}` : '—'}
                   </p>
                   {pl && (
                     <div className={`mt-2 pt-2 border-t border-[#f3f4f6] text-xs font-medium ${pl.gain >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
@@ -229,8 +241,10 @@ export default function DashboardPage() {
       {latestReport && (
         <div>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-[#1a1a1a] font-semibold">📄 Dernier rapport</h2>
-            <Link href="/dashboard/reports" className="text-indigo-600 text-sm hover:text-indigo-500">Voir tous →</Link>
+            <h2 className="text-[#1a1a1a] font-semibold">📄 {t.latest_report}</h2>
+            <Link href="/dashboard/reports" className="text-indigo-600 text-sm hover:text-indigo-500">
+              {t.see_all}
+            </Link>
           </div>
           <ReportCard report={latestReport} compact />
         </div>
