@@ -949,6 +949,7 @@ schedule.every(30).minutes.do(refresh_news_cache)
 schedule.every(2).hours.do(scrape_reddit)
 schedule.every(6).hours.do(scrape_youtube_rss)
 schedule.every().day.at('07:00').do(send_daily_reports)
+schedule.every().friday.at('07:00').do(send_weekly_report_all_clients)
 schedule.every().day.at('22:00').do(deep_nightly_analysis)
 schedule.every().day.at('22:30').do(resolve_predictions)
 
