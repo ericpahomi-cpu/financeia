@@ -12,6 +12,9 @@ import anthropic
 import requests
 from supabase import create_client
 from dotenv import load_dotenv
+from report_generator import generate_report
+from email_sender import send_report_email, send_weekly_report_all_clients
+from data_collector import collect_all_data
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -893,12 +896,59 @@ def scrape_youtube_rss():
             log.warning('YouTube %s: %s', name, e)
 
 
+def send_daily_reports():
+    now = datetime.datetime.now(EST)
+    weekday = now.weekday()  # 0=lundi, 5=samedi
+    # Lundi à vendredi : rapport du jour
+    # Samedi : rapport de vendredi
+    if weekday > 5:
+        return
+    log.info('▶ Génération des rapports quotidiens...')
+    try:
+        data = collect_all_data()
+    except Exception as e:
+        log.error('Erreur collecte données rapport: %s', e)
+        return
+    user_ids = get_all_user_ids()
+    if not user_ids:
+        log.warning('Aucun utilisateur trouvé pour les rapports.')
+        return
+    for uid in user_ids:
+        try:
+            email = get_user_email(uid)
+            if not email:
+                continue
+            favs = get_client_favorites(uid)
+            watched = [f['symbol'] for f in favs]
+            client_profile = {
+                'risk_profile': 'moderate',
+                'language': 'fr',
+                'watched_assets': watched,
+            }
+            report = generate_report(data, client_profile)
+            # Sauvegarde dans Supabase
+            SUPABASE.from_('reports').insert({
+                'client_id': uid,
+                'content': report['content'],
+                'sentiment_score': report['sentiment_score'],
+                'report_date': now.date().isoformat(),
+            }).execute()
+            # Envoi email
+            name = email.split('@')[0].capitalize()
+            send_report_email(email, name, report)
+            log.info('Rapport envoyé → %s', email)
+        except Exception as e:
+            log.error('Rapport uid:%s: %s', uid[:8], e)
+    log.info('✓ Rapports quotidiens envoyés.')
+
+
 # ─── Schedule ─────────────────────────────────────────────────────────────────
 
 schedule.every(15).minutes.do(autonomous_market_scan)
 schedule.every(30).minutes.do(refresh_news_cache)
 schedule.every(2).hours.do(scrape_reddit)
 schedule.every(6).hours.do(scrape_youtube_rss)
+schedule.every().day.at('07:00').do(send_daily_reports)
 schedule.every().day.at('22:00').do(deep_nightly_analysis)
 schedule.every().day.at('22:30').do(resolve_predictions)
 
