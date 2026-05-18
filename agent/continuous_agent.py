@@ -1,10 +1,9 @@
 """
-FinanceAI — Agent continu 24h/24
-Tourne sur Railway avec surveillance toutes les 15 minutes pendant les heures de marché.
-Détection d'événements majeurs (>5% sur indices) → alerte TOUS les clients.
-Cache d'actualités NewsAPI rechargé toutes les 30 minutes.
+FinanceAI — Agent Autonome & Intelligent
+Claude analyse les marchés et prend ses propres décisions.
+Pas de seuils hardcodés — mémoire persistante, auto-amélioration.
 """
-import os, json, time, logging, datetime
+import os, json, re, time, logging, datetime
 from zoneinfo import ZoneInfo
 import schedule
 import anthropic
@@ -16,38 +15,131 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger(__name__)
 
-ANTHROPIC = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
+ANTHROPIC_CLIENT = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
 SUPABASE  = create_client(os.getenv('SUPABASE_URL', ''), os.getenv('SUPABASE_SERVICE_ROLE_KEY', ''))
 EST = ZoneInfo('America/New_York')
+UA  = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
 
-# ─── Helpers ────────────────────────────────────────────────────────────────
+# Global indicators always included in every scan for macro context
+GLOBAL_INDICATORS = ['SPY', 'QQQ', 'BTC-USD', 'ETH-USD', '^VIX', 'GLD']
+
+# ─── Yahoo Finance — session with crumb auth ──────────────────────────────────
+
+_yf = requests.Session()
+_yf.headers.update({'User-Agent': UA})
+_crumb: str | None = None
+_crumb_exp: float  = 0.0
+
 
 def is_market_open() -> bool:
     now = datetime.datetime.now(EST)
-    if now.weekday() >= 5:          # Saturday / Sunday
+    if now.weekday() >= 5:
         return False
     t = now.time()
     return datetime.time(9, 30) <= t <= datetime.time(16, 0)
 
-def get_yahoo_price(symbol: str) -> dict | None:
+
+def get_crumb() -> str | None:
+    global _crumb, _crumb_exp
+    now = time.time()
+    if _crumb and now < _crumb_exp:
+        return _crumb
     try:
-        url = f'https://query1.finance.yahoo.com/v7/finance/quote?symbols={symbol}&formatted=false'
-        r = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
-        q = r.json()['quoteResponse']['result']
-        if not q:
-            return None
-        return {'symbol': symbol, 'price': q[0]['regularMarketPrice'], 'change_pct': q[0]['regularMarketChangePercent']}
+        _yf.get('https://fc.yahoo.com', timeout=10)          # sets session cookies
+        r = _yf.get('https://query1.finance.yahoo.com/v1/test/getcrumb', timeout=10)
+        if r.ok and r.text.strip():
+            _crumb     = r.text.strip()
+            _crumb_exp = now + 55 * 60
+            log.info('Yahoo crumb OK: %s…', _crumb[:6])
+            return _crumb
     except Exception as e:
-        log.warning('Yahoo price error %s: %s', symbol, e)
+        log.warning('Crumb error: %s', e)
+    return None
+
+
+def get_prices_batch(symbols: list[str]) -> list[dict]:
+    """Batch price fetch via v7 (crumb) → falls back to v8 per-symbol."""
+    if not symbols:
+        return []
+    crumb = get_crumb()
+    if crumb:
+        try:
+            url = (
+                'https://query1.finance.yahoo.com/v7/finance/quote'
+                f'?symbols={requests.utils.quote(",".join(symbols))}'
+                f'&formatted=false&crumb={requests.utils.quote(crumb)}'
+            )
+            r = _yf.get(url, timeout=15)
+            if r.ok:
+                results = r.json().get('quoteResponse', {}).get('result', [])
+                if results:
+                    return [_quote_to_dict(q) for q in results]
+        except Exception as e:
+            log.warning('v7 batch error: %s', e)
+
+    # Fallback: parallel v8
+    out = []
+    for sym in symbols:
+        d = get_price_v8(sym)
+        if d:
+            out.append(d)
+    return out
+
+
+def _quote_to_dict(q: dict) -> dict:
+    return {
+        'symbol':     q['symbol'],
+        'name':       q.get('shortName') or q.get('longName') or q['symbol'],
+        'price':      q.get('regularMarketPrice', 0),
+        'change_pct': q.get('regularMarketChangePercent', 0),
+        'volume':     q.get('regularMarketVolume', 0),
+    }
+
+
+def get_price_v8(symbol: str) -> dict | None:
+    try:
+        url = (
+            f'https://query1.finance.yahoo.com/v8/finance/chart/{requests.utils.quote(symbol)}'
+            '?interval=1d&range=2d&includePrePost=false'
+        )
+        r = _yf.get(url, timeout=10)
+        if not r.ok:
+            return None
+        meta  = r.json().get('chart', {}).get('result', [{}])[0].get('meta', {})
+        price = meta.get('regularMarketPrice', 0)
+        prev  = meta.get('chartPreviousClose') or meta.get('previousClose') or 0
+        pct   = ((price - prev) / prev * 100) if prev else 0
+        return {
+            'symbol':     meta.get('symbol', symbol),
+            'name':       meta.get('shortName') or symbol,
+            'price':      price,
+            'change_pct': pct,
+            'volume':     meta.get('regularMarketVolume', 0),
+        }
+    except Exception as e:
+        log.warning('v8 %s: %s', symbol, e)
         return None
 
-def get_all_clients() -> list[dict]:
+
+# ─── Supabase helpers ─────────────────────────────────────────────────────────
+
+def get_all_user_ids() -> list[str]:
+    """All user IDs that have at least one saved favorite."""
     try:
-        res = SUPABASE.from_('clients').select('id, email, name, alert_threshold').execute()
-        return res.data or []
+        res = SUPABASE.from_('favorites').select('client_id').execute()
+        return list(set(f['client_id'] for f in (res.data or []) if f.get('client_id')))
     except Exception as e:
-        log.error('Clients fetch error: %s', e)
+        log.error('get_all_user_ids: %s', e)
         return []
+
+
+def get_user_email(user_id: str) -> str:
+    try:
+        res = SUPABASE.auth.admin.get_user_by_id(user_id)
+        return res.user.email or ''
+    except Exception:
+        return ''
+
 
 def get_client_favorites(client_id: str) -> list[dict]:
     try:
@@ -56,196 +148,444 @@ def get_client_favorites(client_id: str) -> list[dict]:
     except Exception:
         return []
 
-def get_client_watchlist(user_id: str) -> list[dict]:
-    """Lit la watchlist personnelle de l'utilisateur (table watchlist, colonne user_id)."""
-    try:
-        res = SUPABASE.from_('watchlist').select('symbol, type, name').eq('user_id', user_id).execute()
-        return res.data or []
-    except Exception:
-        return []
 
-def get_alert_threshold(client_id: str, default: float = 5.0) -> float:
-    try:
-        res = SUPABASE.from_('user_settings').select('alert_threshold').eq('id', client_id).single().execute()
-        return float(res.data.get('alert_threshold', default)) if res.data else default
-    except Exception:
-        return default
-
-def send_alert_email(to_email: str, subject: str, body: str):
-    import resend
-    resend.api_key = os.getenv('RESEND_API_KEY', '')
-    try:
-        resend.Emails.send({
-            'from': f"{os.getenv('FROM_NAME','FinanceAI')} <{os.getenv('FROM_EMAIL','onboarding@resend.dev')}>",
-            'to': [to_email],
-            'subject': subject,
-            'html': f'<div style="font-family:Arial;max-width:600px;margin:auto;padding:20px"><p>{body}</p></div>',
-        })
-        log.info('Alert email sent to %s', to_email)
-    except Exception as e:
-        log.error('Email error: %s', e)
-
-def save_alert(client_id: str, asset: str, message: str, alert_type: str = 'price'):
+def save_alert(client_id: str, asset: str, message: str, alert_type: str = 'ai_insight'):
     try:
         SUPABASE.from_('alerts').insert({
             'client_id': client_id,
-            'type': alert_type,
-            'asset': asset,
-            'message': message,
-            'is_read': False,
+            'type':      alert_type,
+            'asset':     asset,
+            'message':   message,
+            'is_read':   False,
         }).execute()
     except Exception as e:
-        log.error('Save alert error: %s', e)
+        log.error('save_alert: %s', e)
+
+
+def send_alert_email(to_email: str, subject: str, body: str):
+    try:
+        import resend
+        resend.api_key = os.getenv('RESEND_API_KEY', '')
+        resend.Emails.send({
+            'from': f"{os.getenv('FROM_NAME','FinanceAI')} <{os.getenv('FROM_EMAIL','onboarding@resend.dev')}>",
+            'to':   [to_email],
+            'subject': subject,
+            'html': f'<div style="font-family:Arial;max-width:600px;margin:auto;padding:20px"><p>{body}</p></div>',
+        })
+        log.info('Email → %s', to_email)
+    except Exception as e:
+        log.error('Email error: %s', e)
+
 
 def save_memory(content: str, category: str, importance: int = 5):
     try:
         SUPABASE.from_('agent_memory').insert({
-            'content': content,
-            'category': category,
-            'importance': importance,
+            'content':    content,
+            'category':   category,
+            'importance': max(1, min(10, importance)),
         }).execute()
     except Exception as e:
-        log.error('Save memory error: %s', e)
+        log.error('save_memory: %s', e)
 
-def load_recent_memory(limit: int = 50) -> list[dict]:
+
+def load_contextual_memory() -> str:
+    """
+    Load a curated mix of memories:
+    - Recent observations (last 6 h)
+    - High-importance historical insights (importance ≥ 7)
+    """
     try:
-        res = (SUPABASE.from_('agent_memory').select('content, category, importance, created_at')
-               .order('importance', desc=True).order('created_at', desc=True).limit(limit).execute())
-        return res.data or []
-    except Exception:
-        return []
+        six_h_ago = (
+            datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=6)
+        ).isoformat()
 
-def save_prediction(client_id: str | None, asset: str, direction: str, confidence: int, reasoning: str):
+        recent = (
+            SUPABASE.from_('agent_memory')
+            .select('content, category, importance')
+            .gte('created_at', six_h_ago)
+            .order('importance', desc=True)
+            .limit(15)
+            .execute()
+        )
+        historical = (
+            SUPABASE.from_('agent_memory')
+            .select('content, category, importance')
+            .gte('importance', 7)
+            .lt('created_at', six_h_ago)
+            .order('created_at', desc=True)
+            .limit(15)
+            .execute()
+        )
+        all_mems = (recent.data or []) + (historical.data or [])
+        if not all_mems:
+            return 'Aucune mémoire disponible.'
+        return '\n'.join(
+            f"  [{m['category']}|{m['importance']}] {m['content']}"
+            for m in all_mems
+        )
+    except Exception as e:
+        log.error('load_contextual_memory: %s', e)
+        return ''
+
+
+def save_prediction(client_id: str | None, asset: str, direction: str,
+                    confidence: int, reasoning: str):
     try:
         SUPABASE.from_('predictions').insert({
-            'client_id': client_id,
-            'asset': asset,
-            'direction': direction,
+            'client_id':  client_id,
+            'asset':      asset,
+            'direction':  direction,
             'confidence': confidence,
-            'reasoning': reasoning,
+            'reasoning':  reasoning,
         }).execute()
     except Exception as e:
-        log.error('Save prediction error: %s', e)
+        log.error('save_prediction: %s', e)
 
-# ─── Core tasks ─────────────────────────────────────────────────────────────
 
-MAJOR_EVENT_THRESHOLD = 5.0  # percent
+def parse_json(text: str) -> dict:
+    """Parse Claude's JSON, stripping accidental markdown fences."""
+    text = re.sub(r'^```(?:json)?\s*', '', text.strip(), flags=re.MULTILINE)
+    text = re.sub(r'\s*```$',          '', text.strip(), flags=re.MULTILINE)
+    return json.loads(text.strip())
 
-def check_major_market_events():
+
+# ─── Core intelligence ────────────────────────────────────────────────────────
+
+def autonomous_market_scan():
     """
-    Pour chaque utilisateur ayant une watchlist, vérifie si un de leurs actifs
-    a bougé de plus de MAJOR_EVENT_THRESHOLD% et envoie une alerte personnalisée.
-    Remplace les indices hardcodés par les actions spécifiques de chaque client.
+    Every 15 min — Claude analyses all market data autonomously.
+    No hardcoded thresholds: Claude decides what is significant,
+    who to alert, and what patterns to memorise.
     """
-    if not is_market_open():
+    log.info('▶ Autonomous market scan...')
+
+    # 1. Collect all symbols: global indicators + every user's favourites
+    user_ids = get_all_user_ids()
+    all_symbols: set[str] = set(GLOBAL_INDICATORS)
+    user_portfolios: dict[str, list[dict]] = {}
+
+    for uid in user_ids:
+        favs = get_client_favorites(uid)
+        if favs:
+            user_portfolios[uid] = favs
+            all_symbols.update(f['symbol'] for f in favs)
+
+    # 2. Fetch prices in one batch
+    prices = get_prices_batch(list(all_symbols))
+    if not prices:
+        log.warning('No price data — skipping scan.')
         return
 
-    clients = get_all_clients()
-    if not clients:
+    # 3. Format market snapshot (sorted by absolute move for salience)
+    market_str = '\n'.join(
+        f"  {p['symbol']:12} {p['name'][:22]:22} ${p['price']:>10.2f}  {p['change_pct']:+7.2f}%"
+        + (f"  vol:{p['volume']/1e6:.0f}M" if p.get('volume') else '')
+        for p in sorted(prices, key=lambda x: abs(x['change_pct']), reverse=True)
+    )
+
+    # 4. Load agent memory for context
+    memory_str = load_contextual_memory()
+
+    # 5. Build user watchlist context (abbreviated user IDs for privacy)
+    user_ctx = '\n'.join(
+        f"  uid:{uid[:8]}… → " + ', '.join(
+            f"{f['symbol']}({f['type'][0].upper()})" for f in favs[:8]
+        )
+        for uid, favs in user_portfolios.items()
+    ) or '  Aucun utilisateur avec favoris.'
+
+    now_str = datetime.datetime.now(EST).strftime('%A %d %b %Y %H:%M EST')
+    status  = 'OUVERT' if is_market_open() else 'FERMÉ'
+
+    prompt = f"""Tu es l'agent de surveillance autonome d'une plateforme FinanceAI.
+
+DATE/HEURE : {now_str} — Marché : {status}
+
+DONNÉES DE MARCHÉ (triées par amplitude de mouvement) :
+{market_str}
+
+TES MÉMOIRES RÉCENTES (observations précédentes et insights) :
+{memory_str}
+
+WATCHLISTS UTILISATEURS :
+{user_ctx}
+
+Analyse de manière TOTALEMENT AUTONOME. Tu n'as aucun seuil fixe à respecter.
+Utilise ton jugement pour :
+1. Identifier les mouvements, divergences ou anomalies vraiment significatifs
+2. Détecter des corrélations cross-actifs (ex: VIX monte + SPY baisse ensemble)
+3. Décider qui mérite une alerte personnalisée et rédiger le message
+4. Choisir les insights à mémoriser pour affiner tes prochaines analyses
+5. Évaluer le sentiment global du marché
+
+Réponds UNIQUEMENT avec ce JSON valide — sans texte avant ou après :
+{{
+  "market_mood": "bullish|bearish|neutral|volatile|mixed",
+  "observations": [
+    "observation concise sur un mouvement ou pattern notable"
+  ],
+  "correlations_detected": [
+    "corrélation ou pattern cross-actifs détecté"
+  ],
+  "alerts": [
+    {{
+      "user_id": "uid_complet_exact_ici",
+      "asset": "SYMBOLE",
+      "message": "Message d'alerte clair et utile pour l'utilisateur",
+      "importance": 8,
+      "reasoning": "pourquoi tu juges ça important pour cet utilisateur"
+    }}
+  ],
+  "memories_to_save": [
+    {{
+      "content": "insight précis à retenir pour les prochaines analyses",
+      "category": "pattern|correlation|macro|anomaly|sentiment",
+      "importance": 7
+    }}
+  ]
+}}"""
+
+    try:
+        resp = ANTHROPIC_CLIENT.messages.create(
+            model='claude-sonnet-4-6',
+            max_tokens=2000,
+            system='Tu es un analyste quantitatif expert. Réponds UNIQUEMENT en JSON valide.',
+            messages=[{'role': 'user', 'content': prompt}],
+        )
+        data = parse_json(resp.content[0].text)
+    except Exception as e:
+        log.error('Claude scan error: %s', e)
         return
 
-    # Build a unique set of symbols across all watchlists (avoid duplicate API calls)
-    user_watchlists: dict[str, list[dict]] = {}
-    all_symbols: set[str] = set()
+    # Save memories Claude decided are worth keeping
+    for mem in data.get('memories_to_save', []):
+        save_memory(mem['content'], mem['category'], mem.get('importance', 5))
 
-    for client in clients:
-        uid = client.get('id') or client.get('client_id')
-        if not uid:
+    # Execute personalised alerts
+    alerts_sent = 0
+    for alert in data.get('alerts', []):
+        uid = alert.get('user_id', '')
+        if not uid or uid not in user_portfolios:
             continue
-        # Use favorites table (same table used by the frontend star buttons)
-        items = get_client_favorites(uid)
-        if items:
-            user_watchlists[uid] = items
-            all_symbols.update(i['symbol'] for i in items if i.get('type') == 'stock')
+        email = get_user_email(uid)
+        asset = alert.get('asset', 'MARKET')
+        msg   = alert['message']
+        save_alert(uid, asset, msg, 'ai_insight')
+        if email:
+            send_alert_email(email, f"🤖 FinanceAI — {asset}", msg)
+        alerts_sent += 1
+        log.info('Alert uid:%s… %s — %s', uid[:8], asset, msg[:80])
 
-    if not all_symbols:
-        log.info('No watchlist symbols to monitor for major events.')
+    log.info(
+        '✓ Scan: mood=%s  obs=%d  corr=%d  alerts=%d  memories=%d',
+        data.get('market_mood', '?'),
+        len(data.get('observations', [])),
+        len(data.get('correlations_detected', [])),
+        alerts_sent,
+        len(data.get('memories_to_save', [])),
+    )
+
+
+def deep_nightly_analysis():
+    """
+    Daily at 22:00 — Deep autonomous analysis.
+    Claude evaluates its own past predictions, detects long-term patterns,
+    refines its market thesis, and generates calibrated new predictions.
+    """
+    log.info('▶ Deep nightly analysis...')
+
+    # Load extended memories (48 h)
+    try:
+        cutoff = (
+            datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=48)
+        ).isoformat()
+        mems = (
+            SUPABASE.from_('agent_memory')
+            .select('content, category, importance, created_at')
+            .gte('created_at', cutoff)
+            .order('importance', desc=True)
+            .limit(50)
+            .execute()
+        ).data or []
+    except Exception as e:
+        log.error('Memory load: %s', e)
+        mems = []
+
+    # Load past predictions + outcomes (for self-assessment)
+    try:
+        preds = (
+            SUPABASE.from_('predictions')
+            .select('asset, direction, confidence, reasoning, was_correct, result')
+            .not_.is_('was_correct', 'null')
+            .order('predicted_at', desc=True)
+            .limit(20)
+            .execute()
+        ).data or []
+    except Exception:
+        preds = []
+
+    correct  = sum(1 for p in preds if p.get('was_correct'))
+    total    = len(preds)
+    accuracy = f"{correct}/{total} ({100*correct//total if total else 0}%)" if total else "Aucune prédiction résolue"
+
+    # Load recent news headlines for macro context
+    try:
+        news = (
+            SUPABASE.from_('news_cache')
+            .select('title, source, category')
+            .order('fetched_at', desc=True)
+            .limit(20)
+            .execute()
+        ).data or []
+        news_str = '\n'.join(f"  [{n['category']}] {n['title']} ({n['source']})" for n in news)
+    except Exception:
+        news_str = 'Non disponible'
+
+    memory_str = '\n'.join(
+        f"  [{m['category']}|{m['importance']}] {m['content']}" for m in mems
+    )
+    pred_str = '\n'.join(
+        f"  {p['asset']}: {p['direction']} ({p['confidence']}%) "
+        f"→ {p.get('result','?')} {'✓' if p.get('was_correct') else '✗'}"
+        for p in preds
+    ) or '  Aucune prédiction résolue.'
+
+    prompt = f"""Tu es un hedge fund quantitatif qui effectue son bilan nocturne.
+
+TES PERFORMANCES — {accuracy} :
+{pred_str}
+
+TES OBSERVATIONS DES 48 DERNIÈRES HEURES :
+{memory_str}
+
+ACTUALITÉS RÉCENTES :
+{news_str}
+
+Effectue une analyse profonde et autocritique :
+1. Identifie honnêtement tes biais et erreurs récurrentes dans tes prédictions
+2. Détecte des patterns émergents cross-actifs sur 48 h
+3. Formule une thèse macro pour les prochaines 24 h
+4. Génère des prédictions nouvelles, calibrées sur tes vraies performances passées
+5. Sélectionne les insights les plus importants à conserver en mémoire long-terme
+
+Réponds UNIQUEMENT avec ce JSON valide — sans texte avant ou après :
+{{
+  "self_assessment": "évaluation honnête et critique de tes performances et biais",
+  "market_thesis": "thèse macro principale pour les prochaines 24 h (2-3 phrases max)",
+  "patterns_detected": [
+    "pattern cross-actifs ou macro observé sur 48 h"
+  ],
+  "key_insights": [
+    {{
+      "content": "insight important à conserver",
+      "category": "self_learning|pattern|macro|correlation|risk",
+      "importance": 8
+    }}
+  ],
+  "predictions": [
+    {{
+      "asset": "SYMBOLE",
+      "direction": "hausse|baisse|neutre",
+      "confidence": 65,
+      "reasoning": "raisonnement factuel basé sur les données observées"
+    }}
+  ]
+}}"""
+
+    try:
+        resp = ANTHROPIC_CLIENT.messages.create(
+            model='claude-sonnet-4-6',
+            max_tokens=2500,
+            system='Tu es un analyste quantitatif expert. Réponds UNIQUEMENT en JSON valide.',
+            messages=[{'role': 'user', 'content': prompt}],
+        )
+        data = parse_json(resp.content[0].text)
+    except Exception as e:
+        log.error('Nightly analysis error: %s', e)
         return
 
-    # Fetch prices once per unique symbol
-    price_cache: dict[str, dict] = {}
-    for sym in all_symbols:
-        data = get_yahoo_price(sym)
-        if data:
-            price_cache[sym] = data
+    # Persist high-value memories
+    if data.get('self_assessment'):
+        save_memory(data['self_assessment'], 'self_learning', importance=9)
+    if data.get('market_thesis'):
+        save_memory(data['market_thesis'], 'thesis', importance=9)
+    for p in data.get('patterns_detected', []):
+        save_memory(p, 'pattern', importance=7)
+    for ins in data.get('key_insights', []):
+        save_memory(ins['content'], ins['category'], ins.get('importance', 6))
 
-    # Per-user: alert on symbols that crossed the threshold
-    for client in clients:
-        uid   = client.get('id') or client.get('client_id')
-        email = client.get('email', '')
-        items = user_watchlists.get(uid, [])
+    # Save new predictions
+    for pred in data.get('predictions', []):
+        save_prediction(None, pred['asset'], pred['direction'],
+                        pred['confidence'], pred['reasoning'])
 
-        for item in items:
-            sym = item.get('symbol', '')
-            if item.get('type') != 'stock' or sym not in price_cache:
+    log.info(
+        '✓ Nightly: %d insights, %d predictions',
+        len(data.get('key_insights', [])) + len(data.get('patterns_detected', [])),
+        len(data.get('predictions', [])),
+    )
+
+
+def resolve_predictions():
+    """
+    Daily at 22:30 — Compare yesterday's predictions against real outcomes.
+    Saves each result to memory so the agent can learn from its mistakes.
+    """
+    yesterday = (datetime.datetime.now() - datetime.timedelta(days=1)).isoformat()
+    try:
+        res = (
+            SUPABASE.from_('predictions')
+            .select('id, asset, direction, confidence')
+            .gte('predicted_at', yesterday)
+            .is_('was_correct', 'null')
+            .execute()
+        )
+        for pred in (res.data or []):
+            price_data = get_price_v8(pred['asset'])
+            if not price_data:
                 continue
-            data = price_cache[sym]
-            pct  = data['change_pct']
-            if abs(pct) < MAJOR_EVENT_THRESHOLD:
-                continue
+            pct    = price_data['change_pct']
+            actual = 'hausse' if pct > 1.0 else 'baisse' if pct < -1.0 else 'neutre'
+            correct = actual == pred['direction']
 
-            direction = 'hausse' if pct > 0 else 'baisse'
-            name_label = item.get('name') or sym
-            msg = (
-                f"🚨 {name_label} ({sym}) en {direction} de {pct:+.2f}% aujourd'hui — "
-                f"dépasse votre seuil de surveillance ({MAJOR_EVENT_THRESHOLD}%)."
+            SUPABASE.from_('predictions').update({
+                'result':      f"{pct:+.2f}%",
+                'was_correct': correct,
+                'resolved_at': datetime.datetime.now().isoformat(),
+            }).eq('id', pred['id']).execute()
+
+            log.info('Resolved %s: %s → %s (%+.2f%%) %s',
+                     pred['asset'], pred['direction'], actual, pct,
+                     '✓' if correct else '✗')
+
+            # Save outcome to memory — agent learns from every error
+            note = (
+                f"Prédiction {pred['asset']}: {pred['direction']} → réel {actual} ({pct:+.2f}%). "
+                f"{'Correcte' if correct else 'INCORRECTE'} — confiance était {pred['confidence']}%."
             )
-            log.warning('WATCHLIST EVENT: %s %+.2f%% — alerting user %s', sym, pct, uid)
-            save_alert(uid, sym, msg, alert_type='watchlist_event')
-            if email:
-                send_alert_email(
-                    email,
-                    f"🚨 FinanceAI — {sym} {pct:+.2f}% dans votre watchlist",
-                    msg
-                )
+            # Wrong predictions are more important to remember (importance 8 vs 5)
+            save_memory(note, 'prediction_outcome', importance=8 if not correct else 5)
 
-def check_price_alerts():
-    """Vérifie les prix toutes les 15 min pendant les heures de marché."""
-    if not is_market_open():
-        return
+    except Exception as e:
+        log.error('resolve_predictions: %s', e)
 
-    log.info('Checking price alerts...')
-    clients = get_all_clients()
-    for client in clients:
-        cid   = client.get('id') or client.get('client_id')
-        email = client.get('email', '')
-        threshold = get_alert_threshold(cid)
-        favs = get_client_favorites(cid)
 
-        for fav in favs:
-            if fav['type'] != 'stock':
-                continue
-            data = get_yahoo_price(fav['symbol'])
-            if not data:
-                continue
-            pct = abs(data['change_pct'])
-            if pct >= threshold:
-                direction = 'hausse' if data['change_pct'] > 0 else 'baisse'
-                msg = f"{fav['symbol']} en {direction} de {data['change_pct']:.2f}% aujourd'hui (seuil : {threshold}%)"
-                save_alert(cid, fav['symbol'], msg)
-                if email:
-                    send_alert_email(
-                        email,
-                        f"⚠️ Alerte FinanceAI : {fav['symbol']} {'+' if data['change_pct'] > 0 else ''}{data['change_pct']:.2f}%",
-                        msg
-                    )
-                    log.info('Alert sent: %s %+.2f%%', fav['symbol'], data['change_pct'])
+# ─── Data collection ──────────────────────────────────────────────────────────
 
 def refresh_news_cache():
-    """Récupère les actualités depuis NewsAPI et les stocke dans news_cache (toutes les 30 min)."""
+    """Fetch latest news via NewsAPI every 30 min → store in news_cache."""
     NEWS_API_KEY = os.getenv('NEWS_API_KEY', '')
     if not NEWS_API_KEY:
         log.warning('NEWS_API_KEY not set — skipping news cache refresh')
         return
 
     CATEGORIES = {
-        'all':       'finance OR economy OR markets OR stocks OR crypto OR Canada economy',
-        'politique': 'politics economy policy government Canada USA Federal Reserve Bank of Canada',
-        'economie':  'GDP inflation employment economy Canada USA recession growth',
-        'marches':   'stock market NYSE NASDAQ TSX S&P 500 earnings trading',
-        'banques':   'Federal Reserve Bank of Canada interest rates central bank monetary policy',
+        'all':       'finance OR economy OR markets OR stocks OR crypto',
+        'politique': 'politics economy policy government Canada USA Federal Reserve',
+        'economie':  'GDP inflation employment economy Canada USA recession',
+        'marches':   'stock market NYSE NASDAQ TSX S&P 500 earnings',
+        'banques':   'Federal Reserve Bank of Canada interest rates monetary policy',
     }
-
     log.info('Refreshing news cache...')
     for category, q in CATEGORIES.items():
         try:
@@ -255,154 +595,95 @@ def refresh_news_cache():
             )
             r = requests.get(url, timeout=15)
             if not r.ok:
-                log.warning('NewsAPI error for category %s: %s', category, r.status_code)
                 continue
-
-            articles = r.json().get('articles', [])
             rows = [
                 {
-                    'category':     category,
-                    'title':        a['title'],
-                    'description':  a.get('description', ''),
-                    'url':          a.get('url', ''),
-                    'source':       a.get('source', {}).get('name', ''),
+                    'category':    category,
+                    'title':       a['title'],
+                    'description': a.get('description', ''),
+                    'url':         a.get('url', ''),
+                    'source':      a.get('source', {}).get('name', ''),
                     'published_at': a.get('publishedAt'),
-                    'image':        a.get('urlToImage', ''),
+                    'image':       a.get('urlToImage', ''),
                 }
-                for a in articles
+                for a in r.json().get('articles', [])
                 if a.get('title') and a['title'] != '[Removed]'
             ]
             if rows:
                 SUPABASE.from_('news_cache').insert(rows).execute()
-                log.info('News cache refreshed: %d articles for category "%s"', len(rows), category)
+                log.info('News cached: %d articles [%s]', len(rows), category)
         except Exception as e:
-            log.error('News cache error for %s: %s', category, e)
+            log.error('News [%s]: %s', category, e)
 
-def scrape_youtube_rss():
-    """Scrappe les RSS YouTube des grands investisseurs."""
-    CHANNELS = {
-        'ARK Invest':       'UCRo-vRW4bkwgV5hBPoXhFiQ',
-        'Berkshire':        'UCK4tQ7OQXe0V2H3KDZW9_cQ',
-        'Ray Dalio':        'UC16nlN5KmgEq1ryoxJf0OAw',
-    }
-    two_weeks_ago = datetime.datetime.now() - datetime.timedelta(weeks=2)
-
-    for channel_name, channel_id in CHANNELS.items():
-        try:
-            url = f'https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}'
-            r = requests.get(url, timeout=10)
-            if not r.ok:
-                continue
-            # Basic parsing: extract titles and published dates
-            import re
-            titles    = re.findall(r'<title>([^<]+)</title>', r.text)[1:]  # skip channel title
-            pub_dates = re.findall(r'<published>([^<]+)</published>', r.text)
-
-            for title, pub in zip(titles[:5], pub_dates[:5]):
-                pub_dt = datetime.datetime.fromisoformat(pub.replace('Z', '+00:00')).replace(tzinfo=None)
-                if pub_dt >= two_weeks_ago:
-                    content = f'[{channel_name}] {title} — {pub}'
-                    save_memory(content, 'youtube', importance=6)
-                    log.info('Saved YouTube insight: %s', title[:60])
-        except Exception as e:
-            log.warning('YouTube RSS error for %s: %s', channel_name, e)
 
 def scrape_reddit():
-    """Scrappe Reddit finance via API publique (pas de clé requise pour GET)."""
+    """Scrape trending posts from finance subreddits → save sentiment to memory."""
     SUBREDDITS = ['investing', 'stocks', 'PersonalFinanceCanada', 'canadianinvestor']
-    two_weeks_ago = datetime.datetime.now().timestamp() - 14 * 86400
+    cutoff = datetime.datetime.now().timestamp() - 14 * 86400
 
     for sub in SUBREDDITS:
         try:
-            url = f'https://www.reddit.com/r/{sub}/hot.json?limit=10'
-            r = requests.get(url, headers={'User-Agent': 'FinanceAI/1.0'}, timeout=10)
+            r = requests.get(
+                f'https://www.reddit.com/r/{sub}/hot.json?limit=10',
+                headers={'User-Agent': 'FinanceAI/1.0'}, timeout=10
+            )
             if not r.ok:
                 continue
-            posts = r.json()['data']['children']
-            for p in posts:
+            for p in r.json()['data']['children']:
                 d = p['data']
-                if d.get('created_utc', 0) >= two_weeks_ago and not d.get('stickied'):
-                    content = f'[r/{sub}] {d["title"]} — score:{d["score"]}'
-                    save_memory(content, 'reddit', importance=5)
+                if d.get('created_utc', 0) >= cutoff and not d.get('stickied'):
+                    save_memory(
+                        f"[r/{sub}] {d['title']} (score:{d['score']})",
+                        'sentiment', importance=5,
+                    )
         except Exception as e:
-            log.warning('Reddit error for r/%s: %s', sub, e)
+            log.warning('Reddit r/%s: %s', sub, e)
 
-def nightly_market_analysis():
-    """Analyse globale nocturne — sauvegarde insights et pronostics."""
-    log.info('Running nightly market analysis...')
-    memories = load_recent_memory(50)
-    memory_context = '\n'.join([f"- {m['content']}" for m in memories[:20]])
 
-    try:
-        response = ANTHROPIC.messages.create(
-            model='claude-sonnet-4-6',
-            max_tokens=1500,
-            system='Tu es un analyste financier expert. Réponds UNIQUEMENT en JSON valide, sans markdown.',
-            messages=[{
-                'role': 'user',
-                'content': f"""Voici des insights récents collectés :
-{memory_context}
+def scrape_youtube_rss():
+    """Scrape YouTube RSS for major finance channels → save to memory."""
+    CHANNELS = {
+        'ARK Invest': 'UCRo-vRW4bkwgV5hBPoXhFiQ',
+        'Berkshire':  'UCK4tQ7OQXe0V2H3KDZW9_cQ',
+        'Ray Dalio':  'UC16nlN5KmgEq1ryoxJf0OAw',
+    }
+    cutoff = datetime.datetime.now() - datetime.timedelta(weeks=2)
 
-Génère une analyse du marché pour demain. Réponds UNIQUEMENT avec ce JSON :
-{{
-  "insights": ["insight 1", "insight 2", "insight 3"],
-  "predictions": [
-    {{"asset": "AAPL", "direction": "hausse", "confidence": 70, "reasoning": "raison courte"}},
-    {{"asset": "BTC",  "direction": "neutre", "confidence": 55, "reasoning": "raison courte"}}
-  ]
-}}"""
-            }]
-        )
-        text = response.content[0].text
-        data = json.loads(text)
-
-        for insight in data.get('insights', []):
-            save_memory(insight, 'analysis', importance=8)
-
-        for pred in data.get('predictions', []):
-            save_prediction(None, pred['asset'], pred['direction'], pred['confidence'], pred['reasoning'])
-            log.info('Prediction saved: %s %s %d%%', pred['asset'], pred['direction'], pred['confidence'])
-
-    except Exception as e:
-        log.error('Nightly analysis error: %s', e)
-
-def resolve_predictions():
-    """Compare les prédictions de la veille avec les résultats réels."""
-    yesterday = (datetime.datetime.now() - datetime.timedelta(days=1)).isoformat()
-    try:
-        res = (SUPABASE.from_('predictions').select('id, asset, direction, confidence')
-               .gte('predicted_at', yesterday).is_('was_correct', 'null').execute())
-        for pred in (res.data or []):
-            data = get_yahoo_price(pred['asset'])
-            if not data:
+    for name, channel_id in CHANNELS.items():
+        try:
+            r = requests.get(
+                f'https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}',
+                timeout=10
+            )
+            if not r.ok:
                 continue
-            actual_dir = 'hausse' if data['change_pct'] > 0 else 'baisse' if data['change_pct'] < -0.5 else 'neutre'
-            correct = actual_dir == pred['direction']
-            SUPABASE.from_('predictions').update({
-                'result': f"{data['change_pct']:+.2f}%",
-                'was_correct': correct,
-                'resolved_at': datetime.datetime.now().isoformat(),
-            }).eq('id', pred['id']).execute()
-            log.info('Resolved prediction %s: %s (correct=%s)', pred['asset'], actual_dir, correct)
-    except Exception as e:
-        log.error('Resolve predictions error: %s', e)
+            titles    = re.findall(r'<title>([^<]+)</title>', r.text)[1:]
+            pub_dates = re.findall(r'<published>([^<]+)</published>', r.text)
+            for title, pub in zip(titles[:5], pub_dates[:5]):
+                pub_dt = datetime.datetime.fromisoformat(
+                    pub.replace('Z', '+00:00')
+                ).replace(tzinfo=None)
+                if pub_dt >= cutoff:
+                    save_memory(f"[{name}] {title}", 'youtube', importance=6)
+                    log.info('YouTube: [%s] %s', name, title[:60])
+        except Exception as e:
+            log.warning('YouTube %s: %s', name, e)
 
-# ─── Schedule ────────────────────────────────────────────────────────────────
 
-schedule.every(15).minutes.do(check_price_alerts)
-schedule.every(15).minutes.do(check_major_market_events)
+# ─── Schedule ─────────────────────────────────────────────────────────────────
+
+schedule.every(15).minutes.do(autonomous_market_scan)
 schedule.every(30).minutes.do(refresh_news_cache)
 schedule.every(2).hours.do(scrape_reddit)
 schedule.every(6).hours.do(scrape_youtube_rss)
-schedule.every().day.at('22:00').do(nightly_market_analysis)
+schedule.every().day.at('22:00').do(deep_nightly_analysis)
 schedule.every().day.at('22:30').do(resolve_predictions)
 
 if __name__ == '__main__':
-    log.info('FinanceAI continuous agent started.')
-    # Run key tasks once on startup
+    log.info('FinanceAI autonomous agent started.')
     refresh_news_cache()
     scrape_reddit()
-    scrape_youtube_rss()
+    autonomous_market_scan()   # Run immediately on startup
     while True:
         schedule.run_pending()
         time.sleep(30)

@@ -100,57 +100,16 @@ function ChartPlaceholder() {
   );
 }
 
-// ── Auto-detect fallback: asset name → TradingView symbol ────────────────────
-const CRYPTO_AUTO: Array<[RegExp, string]> = [
-  [/\bbitcoin\b/i,   'BTC-USD'],
-  [/\bethereum\b/i,  'ETH-USD'],
-  [/\bsolana\b/i,    'SOL-USD'],
-  [/\bbnb\b/i,       'BNB-USD'],
-  [/\bxrp\b/i,       'XRP-USD'],
-  [/\bdogecoin\b/i,  'DOGE-USD'],
-  [/\bdoge\b/i,      'DOGE-USD'],
-  [/\bavalanche\b/i, 'AVAX-USD'],
-  [/\bavax\b/i,      'AVAX-USD'],
-  [/\bpolygon\b/i,   'MATIC-USD'],
-  [/\bmatic\b/i,     'MATIC-USD'],
-  [/\bchainlink\b/i, 'LINK-USD'],
-  [/\bcardano\b/i,   'ADA-USD'],
-  [/\bada\b/i,       'ADA-USD'],
-];
-
-const STOCK_AUTO: Array<[RegExp, string]> = [
-  [/\bapple\b/i,     'AAPL'],
-  [/\bmicrosoft\b/i, 'MSFT'],
-  [/\btesla\b/i,     'TSLA'],
-  [/\bamazon\b/i,    'AMZN'],
-  [/\bgoogle\b/i,    'GOOGL'],
-  [/\bgoogl?\b/i,    'GOOGL'],
-  [/\bnvidia\b/i,    'NVDA'],
-  [/\bmeta\b/i,      'META'],
-  [/\bnetflix\b/i,   'NFLX'],
-  [/\bshopify\b/i,   'SHOP'],
-  [/\bcoinbase\b/i,  'COIN'],
-];
-
-/** Extract chart symbols from a message that has finished streaming.
- *  1. Looks for explicit [CHART:X] tags first.
- *  2. Falls back to scanning for known asset names if none found.
+/** Extract explicit [CHART:X] tags from a completed message.
+ *  Claude is instructed via system prompt to always include these tags —
+ *  no client-side mapping needed.
  */
 function getChartSymbols(content: string): string[] {
   const clean = stripMarkdown(content);
   const segments = parseSegments(clean);
-
-  // Prefer explicit tags
-  const explicit = segments
+  return segments
     .filter((s): s is { type: 'chart'; symbol: string } => s.type === 'chart')
     .map((s) => s.symbol);
-  if (explicit.length > 0) return explicit;
-
-  // Auto-detect fallback — return first match found
-  for (const [pattern, symbol] of [...CRYPTO_AUTO, ...STOCK_AUTO]) {
-    if (pattern.test(clean)) return [symbol];
-  }
-  return [];
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
