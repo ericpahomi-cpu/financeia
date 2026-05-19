@@ -60,7 +60,8 @@ Réponds UNIQUEMENT avec un objet JSON valide — aucun texte avant ou après, a
     });
 
     // ── Extract text block ────────────────────────────────────────────────────
-    const textBlock = response.content.find((b) => b.type === 'text');
+    const textBlocks = response.content.filter((b) => b.type === 'text');
+    const textBlock = textBlocks[textBlocks.length - 1];
     if (!textBlock || textBlock.type !== 'text') {
       return NextResponse.json({ error: 'Pas de réponse textuelle de Claude' }, { status: 502 });
     }
