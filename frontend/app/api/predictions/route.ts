@@ -10,7 +10,7 @@ const adminSupabase = createClient(
 export async function GET() {
   try {
     // Auth check — return only public (client_id IS NULL) + user-specific predictions
-    const supabase = createServerClient();
+    const supabase = await createServerClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     let query = adminSupabase

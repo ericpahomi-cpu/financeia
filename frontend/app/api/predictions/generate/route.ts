@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
     const ticker = symbol.trim().toUpperCase();
 
     // ── Auth ──────────────────────────────────────────────────────────────────
-    const supabase = createServerClient();
+    const supabase = await createServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });

@@ -17,7 +17,7 @@ const DEFAULTS = {
 };
 
 export async function GET() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json(DEFAULTS, { status: 401 });
 
@@ -36,7 +36,7 @@ export async function GET() {
 }
 
 export async function PUT(req: NextRequest) {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
 
