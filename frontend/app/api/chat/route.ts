@@ -68,7 +68,8 @@ export async function POST(req: NextRequest) {
         .from('conversations')
         .select('role, content')
         .eq('client_id', user.id)
-        .order('created_at', { ascending: false })
+        .not('role', 'is', null)
+        .order('created_at', { ascending: true })
         .limit(20),
       supabaseAdmin
         .from('user_preferences')
@@ -81,8 +82,10 @@ export async function POST(req: NextRequest) {
       console.error('[chat] history fetch error:', historyResult.error.message, historyResult.error.code);
     }
 
-    // Chronological order for Claude (oldest → newest)
-    const history = historyResult.data ? [...historyResult.data].reverse() : [];
+    // Only rows with a non-null role count as real conversation history
+    const history = (historyResult.data ?? []).filter(
+      (m) => m.role !== null && m.content !== null
+    );
     const prefs   = prefsResult.data as { language?: string; level?: string; risk_profile?: string } | null;
     const lang      = prefs?.language ?? 'fr';
     const level     = prefs?.level    ?? 'beginner';
