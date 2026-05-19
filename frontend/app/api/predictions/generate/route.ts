@@ -5,7 +5,6 @@ import { createClient } from '@supabase/supabase-js';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
-  defaultHeaders: { 'anthropic-beta': 'web-search-2025-03-05' },
 });
 
 const adminSupabase = createClient(
@@ -31,37 +30,31 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
     }
 
-    // ── Ask Claude (with web_search) ─────────────────────────────────────────
+    // ── Ask Claude Haiku (no web_search — avoids timeouts) ───────────────────
     const response = await anthropic.messages.create({
-      model:      'claude-sonnet-4-6',
-      max_tokens: 800,
+      model:      'claude-haiku-4-5',
+      max_tokens: 600,
       system:     'Tu es un analyste financier. Réponds UNIQUEMENT avec un objet JSON valide, aucun texte avant ou après, aucun bloc markdown.',
-      tools:      [{ type: 'web_search_20250305', name: 'web_search' }],
       messages: [{
         role: 'user',
-        content: `Recherche le prix actuel, les données techniques récentes et les actualités importantes pour l'actif financier "${ticker}".
+        content: `Génère un pronostic pour l'actif financier "${ticker}" pour les prochaines 48-72 heures, basé sur tes connaissances générales des marchés.
 
-À partir de ces données, génère un pronostic pour les prochaines 48-72 heures.
-
-Réponds UNIQUEMENT avec un objet JSON valide — aucun texte avant ou après, aucun bloc markdown :
+Réponds UNIQUEMENT avec un objet JSON valide :
 
 {
   "direction": "hausse" ou "baisse" ou "neutre",
   "confidence": <entier 0-100>,
-  "target_price": <prix cible numérique ou null>,
+  "target_price": null,
   "timeframe": "48-72h",
   "reasoning": "<3-4 phrases naturelles expliquant le raisonnement, sans jargon excessif>",
-  "references": [
-    {"title": "<titre de la source>", "url": "<url exacte>"}
-  ],
+  "references": [],
   "risks": ["<risque court 1>", "<risque court 2>", "<risque court 3>"]
 }`,
       }],
     });
 
     // ── Extract text block ────────────────────────────────────────────────────
-    const textBlocks = response.content.filter((b) => b.type === 'text');
-    const textBlock = textBlocks[textBlocks.length - 1];
+    const textBlock = response.content.find((b) => b.type === 'text');
     if (!textBlock || textBlock.type !== 'text') {
       return NextResponse.json({ error: 'Pas de réponse textuelle de Claude' }, { status: 502 });
     }
