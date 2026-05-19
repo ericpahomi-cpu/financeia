@@ -42,8 +42,6 @@ function stripMarkdown(text: string): string {
     .trim();
 }
 
-type ChatMessage = { role: 'user' | 'assistant'; content: string };
-
 export async function POST(req: NextRequest) {
   try {
     const { message } = await req.json();
@@ -64,13 +62,14 @@ export async function POST(req: NextRequest) {
       'Client'
     ).split(' ')[0];
 
-    // ── Fetch history (JSONB) + user preferences in parallel ─────────────────
-    const [convResult, prefsResult] = await Promise.all([
+    // ── Fetch history + user preferences in parallel ──────────────────────────
+    const [historyResult, prefsResult] = await Promise.all([
       supabaseAdmin
         .from('conversations')
-        .select('messages')
+        .select('role, content')
         .eq('client_id', user.id)
-        .single(),
+        .order('created_at', { ascending: false })
+        .limit(20),
       supabaseAdmin
         .from('user_preferences')
         .select('language, level, risk_profile')
@@ -78,19 +77,13 @@ export async function POST(req: NextRequest) {
         .single(),
     ]);
 
-    // PGRST116 = no row found (first-ever conversation) — that's expected, not an error
-    if (convResult.error && convResult.error.code !== 'PGRST116') {
-      console.error('[chat] history fetch error:', convResult.error.message, convResult.error.code);
+    if (historyResult.error) {
+      console.error('[chat] history fetch error:', historyResult.error.message, historyResult.error.code);
     }
 
-    // Full message array kept in memory for the save step
-    const allMessages: ChatMessage[] = Array.isArray(convResult.data?.messages)
-      ? (convResult.data.messages as ChatMessage[])
-      : [];
-
-    // Slice last 20 messages for Claude context
-    const history   = allMessages.slice(-20);
-    const prefs     = prefsResult.data as { language?: string; level?: string; risk_profile?: string } | null;
+    // Chronological order for Claude (oldest → newest)
+    const history = historyResult.data ? [...historyResult.data].reverse() : [];
+    const prefs   = prefsResult.data as { language?: string; level?: string; risk_profile?: string } | null;
     const lang      = prefs?.language ?? 'fr';
     const level     = prefs?.level    ?? 'beginner';
     const langLabel = LANG_NAMES[lang] ?? 'français';
@@ -114,8 +107,11 @@ Quand tu mentionnes une action ou une crypto, termine toujours ta réponse par l
 Symboles crypto : BTC-USD, ETH-USD, SOL-USD, BNB-USD, XRP-USD, DOGE-USD, AVAX-USD, ADA-USD, LINK-USD, MATIC-USD. Symboles actions : AAPL, MSFT, TSLA, AMZN, GOOGL, NVDA, META, NFLX, SHOP, COIN, JPM, BAC, GS, V, MA, AMD.`;
 
     // ── Messages for Claude ───────────────────────────────────────────────────
-    const claudeMessages: ChatMessage[] = [
-      ...history,
+    const claudeMessages: { role: 'user' | 'assistant'; content: string }[] = [
+      ...history.map((m) => ({
+        role:    m.role as 'user' | 'assistant',
+        content: m.content as string,
+      })),
       { role: 'user', content: message },
     ];
 
@@ -149,25 +145,16 @@ Symboles crypto : BTC-USD, ETH-USD, SOL-USD, BNB-USD, XRP-USD, DOGE-USD, AVAX-US
           // ── Save BEFORE [DONE] — prevents serverless kill ─────────────────
           if (assistantContent) {
             const cleanContent = stripMarkdown(assistantContent);
-
-            // Append new messages to the full history and upsert the single row
-            const updatedMessages: ChatMessage[] = [
-              ...allMessages,
-              { role: 'user',      content: message      },
-              { role: 'assistant', content: cleanContent },
-            ];
-
             const { error: saveError } = await supabaseAdmin
               .from('conversations')
-              .upsert(
-                { client_id: user.id, messages: updatedMessages },
-                { onConflict: 'client_id' }
-              );
-
+              .insert([
+                { client_id: user.id, role: 'user',      content: message      },
+                { client_id: user.id, role: 'assistant', content: cleanContent },
+              ]);
             if (saveError) {
               console.error('[chat] save error:', saveError.message, saveError.code);
             } else {
-              console.log(`[chat] saved — user=${user.id} total_msgs=${updatedMessages.length}`);
+              console.log(`[chat] saved — user=${user.id} chars=${cleanContent.length}`);
             }
           }
 
