@@ -121,7 +121,7 @@ Symboles crypto : BTC-USD, ETH-USD, SOL-USD, BNB-USD, XRP-USD, DOGE-USD, AVAX-US
     // ── Stream ────────────────────────────────────────────────────────────────
     const stream = await anthropic.messages.stream({
       model:      'claude-sonnet-4-6',
-      max_tokens: 1024,
+      max_tokens: 600,
       system:     systemPrompt,
       tools:      [{ type: 'web_search_20250305', name: 'web_search' }],
       messages:   claudeMessages,

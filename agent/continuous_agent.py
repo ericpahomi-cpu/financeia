@@ -358,7 +358,7 @@ Réponds UNIQUEMENT avec ce JSON valide — sans texte avant ou après :
     try:
         resp = ANTHROPIC_CLIENT.messages.create(
             model='claude-sonnet-4-6',
-            max_tokens=2000,
+            max_tokens=1000,
             system='Tu es un analyste quantitatif expert. Réponds UNIQUEMENT en JSON valide.',
             messages=[{'role': 'user', 'content': prompt}],
         )
@@ -505,7 +505,7 @@ Réponds UNIQUEMENT avec ce JSON valide — sans texte avant ou après :
     try:
         resp = ANTHROPIC_CLIENT.messages.create(
             model='claude-sonnet-4-6',
-            max_tokens=2500,
+            max_tokens=1500,
             system='Tu es un analyste quantitatif expert. Réponds UNIQUEMENT en JSON valide.',
             messages=[{'role': 'user', 'content': prompt}],
         )
@@ -737,7 +737,7 @@ Réponds UNIQUEMENT avec ce JSON valide :
     try:
         resp = ANTHROPIC_CLIENT.messages.create(
             model='claude-haiku-4-5',
-            max_tokens=1200,
+            max_tokens=600,
             system='Tu es un filtre de contenu financier. Réponds UNIQUEMENT en JSON valide.',
             messages=[{'role': 'user', 'content': prompt}],
         )
@@ -1207,8 +1207,8 @@ def send_daily_reports():
 
 # ─── Schedule ─────────────────────────────────────────────────────────────────
 
-schedule.every(15).minutes.do(autonomous_market_scan)
-schedule.every(30).minutes.do(refresh_news_cache)
+schedule.every(30).minutes.do(autonomous_market_scan)
+schedule.every(60).minutes.do(refresh_news_cache)
 schedule.every(2).hours.do(scrape_reddit)
 schedule.every(6).hours.do(scrape_youtube_rss)
 schedule.every(6).hours.do(scrape_investor_signals)
