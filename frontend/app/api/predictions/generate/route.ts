@@ -35,6 +35,7 @@ export async function POST(req: NextRequest) {
     const response = await anthropic.messages.create({
       model:      'claude-sonnet-4-6',
       max_tokens: 800,
+      system:     'Tu es un analyste financier. Réponds UNIQUEMENT avec un objet JSON valide, aucun texte avant ou après, aucun bloc markdown.',
       tools:      [{ type: 'web_search_20250305', name: 'web_search' }],
       messages: [{
         role: 'user',
@@ -69,8 +70,8 @@ Réponds UNIQUEMENT avec un objet JSON valide — aucun texte avant ou après, a
     try {
       let raw = textBlock.text.trim();
       raw = raw.replace(/^```(?:json)?\s*/m, '').replace(/\s*```$/m, '').trim();
-      const lastBrace = raw.lastIndexOf('}');
-      if (lastBrace !== -1) raw = raw.slice(0, lastBrace + 1);
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (match) raw = match[0];
       prediction = JSON.parse(raw);
     } catch (err) {
       console.error('[predictions/generate] JSON parse error:', err, textBlock.text.slice(0, 200));
