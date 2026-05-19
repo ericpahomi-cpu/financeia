@@ -13,6 +13,8 @@ const adminSupabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+export const maxDuration = 60;
+
 export async function POST(req: NextRequest) {
   try {
     const { symbol } = await req.json();
@@ -32,7 +34,7 @@ export async function POST(req: NextRequest) {
     // ── Ask Claude (with web_search) ─────────────────────────────────────────
     const response = await anthropic.messages.create({
       model:      'claude-sonnet-4-6',
-      max_tokens: 1024,
+      max_tokens: 800,
       tools:      [{ type: 'web_search_20250305', name: 'web_search' }],
       messages: [{
         role: 'user',
