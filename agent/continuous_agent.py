@@ -1257,6 +1257,7 @@ if __name__ == '__main__':
     refresh_news_cache()
     scrape_reddit()
     autonomous_market_scan()   # Run immediately on startup
+    send_daily_reports()       # Send report immediately on startup
     while True:
         schedule.run_pending()
         time.sleep(30)
