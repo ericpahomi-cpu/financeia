@@ -27,7 +27,7 @@ def handle_chat_message(conversation_id: str, message: str, history: list) -> st
     ]
 
     response = client_ai.messages.create(
-        model="claude-sonnet-4-6",
+        model="claude-haiku-4-5",
         max_tokens=1024,
         system=SYSTEM_PROMPT,
         messages=messages

@@ -33,7 +33,7 @@ export async function GET() {
   // Generate fresh watchlist
   try {
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
+      model: 'claude-haiku-4-5',
       max_tokens: 1500,
       tools: [{ type: 'web_search_20250305', name: 'web_search' }],
       system: 'You are a financial analyst. Search the web for the latest market data and return ONLY a valid JSON array. No markdown, no explanation — raw JSON only.',
