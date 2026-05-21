@@ -2,9 +2,13 @@ import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest } from 'next/server';
 import { createClient as createSupabaseAdmin } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
+import { ALL_TOOLS, executeToolByName } from '@/lib/agent-tools';
+
+export const runtime    = 'nodejs';
+export const maxDuration = 60;
 
 const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
+  apiKey:         process.env.ANTHROPIC_API_KEY,
   defaultHeaders: { 'anthropic-beta': 'web-search-2025-03-05' },
 });
 
@@ -14,39 +18,10 @@ const supabaseAdmin = createSupabaseAdmin(
 );
 
 const LANG_NAMES: Record<string, string> = {
-  fr: 'français',
-  en: 'English',
-  es: 'español',
-  ru: 'русский',
-  ro: 'română',
+  fr: 'français', en: 'English', es: 'español', ru: 'русский', ro: 'română',
 };
 
-/** Route message to Sonnet (complex) or Haiku (simple). */
-function needsSonnet(msg: string, level: string = 'beginner'): boolean {
-  const COMPLEX_KEYWORDS = [
-    'analyse', 'analyser', 'stratégie', 'strategie',
-    'recommande', 'recommandation', 'recommander',
-    'compare', 'comparer', 'comparaison',
-    'portefeuille', 'portfolio',
-    'pronostic', 'prédiction', 'prévision',
-    'impact', 'conséquence', 'consequence',
-    'scénario', 'simulation', 'simuler',
-    'pourquoi', 'comment ça marche',
-    'devrais-je', 'dois-je',
-    'évalue', 'evaluation',
-    'optimise', 'optimiser',
-    'planifie', 'planification',
-    'diversifie', 'diversification',
-    'risque', 'risques',
-  ];
-  const SIMPLE_PATTERNS = /^(merci|ok|salut|bonjour|au revoir|à plus|bye|thanks|hello|hi|coucou|allô|allo|spasibo|gracias|hola|buna|multumesc)/i;
-  const lower = msg.toLowerCase().trim();
-  if (lower.length < 30 && SIMPLE_PATTERNS.test(lower)) return false;
-  if (level === 'expert') return true;
-  return COMPLEX_KEYWORDS.some((kw) => lower.includes(kw)) || msg.length > 150;
-}
-
-/** Strip markdown before storing or streaming to the client. Preserves [CHART:X] tags. */
+/** Strip markdown before saving to DB. Preserves [CHART:X] tags. */
 function stripMarkdown(text: string): string {
   return text
     .replace(/^#{1,6}\s+/gm, '')
@@ -59,8 +34,7 @@ function stripMarkdown(text: string): string {
     .replace(/^\s*\d+\.\s+/gm, '')
     .replace(/^-{3,}\s*$/gm, '')
     .replace(/^={3,}\s*$/gm, '')
-    .replace(/```[\s\S]*?```/g, (m) =>
-      m.replace(/^```[^\n]*\n?/, '').replace(/\n?```$/, ''))
+    .replace(/```[\s\S]*?```/g, (m) => m.replace(/^```[^\n]*\n?/, '').replace(/\n?```$/, ''))
     .replace(/`([^`\n]+)`/g, '$1')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .replace(/\n{3,}/g, '\n\n')
@@ -87,7 +61,7 @@ export async function POST(req: NextRequest) {
       'Client'
     ).split(' ')[0];
 
-    // ── Fetch history + user preferences in parallel ──────────────────────────
+    // ── Fetch history + preferences in parallel ───────────────────────────────
     const [historyResult, prefsResult] = await Promise.all([
       supabaseAdmin
         .from('conversations')
@@ -98,104 +72,202 @@ export async function POST(req: NextRequest) {
         .limit(20),
       supabaseAdmin
         .from('user_preferences')
-        .select('language, level, risk_profile')
+        .select('language, level, risk_profile, currency')
         .eq('user_id', user.id)
         .single(),
     ]);
 
     if (historyResult.error) {
-      console.error('[chat] history fetch error:', historyResult.error.message, historyResult.error.code);
+      console.error('[chat] history fetch error:', historyResult.error.message);
     }
 
-    // Only rows with a non-null role count as real conversation history
-    const history = (historyResult.data ?? []).filter(
-      (m) => m.role !== null && m.content !== null
-    );
-    const prefs   = prefsResult.data as { language?: string; level?: string; risk_profile?: string } | null;
-    const lang      = prefs?.language ?? 'fr';
-    const level     = prefs?.level    ?? 'beginner';
-    const langLabel = LANG_NAMES[lang] ?? 'français';
+    const history = (historyResult.data ?? []).filter((m) => m.role && m.content);
+    const prefs   = prefsResult.data as {
+      language?: string; level?: string; risk_profile?: string; currency?: string;
+    } | null;
+
+    const lang        = prefs?.language    ?? 'fr';
+    const level       = prefs?.level       ?? 'beginner';
+    const risk        = prefs?.risk_profile ?? 'moderate';
+    const currency    = prefs?.currency    ?? 'CAD';
+    const langLabel   = LANG_NAMES[lang]   ?? 'français';
     const isFirstMessage = history.length === 0;
+    const today       = new Date().toLocaleDateString(
+      lang === 'fr' ? 'fr-CA' : 'en-CA',
+      { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }
+    );
 
     console.log(`[chat] user=${user.id} history=${history.length} lang=${lang} level=${level}`);
 
-    // ── System prompt ─────────────────────────────────────────────────────────
-    const systemPrompt = `Tu es le conseiller financier personnel de ${firstName}. Réponds uniquement en ${langLabel}.
-
-Tu parles comme un conseiller qui connaît bien son client — chaleureux, direct, jamais condescendant. ${level === 'expert' ? 'Tu peux utiliser le vocabulaire technique, ' + firstName + ' s\'y connaît.' : 'Tu expliques simplement, sans jargon.'} Tu vas droit au but en 2 à 4 phrases. Pas de listes à puces, pas de titres, pas de mise en forme — du texte naturel, comme si tu parlais en face à face.
-
-${isFirstMessage
-  ? `C'est votre premier échange : accueille ${firstName} chaleureusement en une seule phrase, puis réponds directement à sa question.`
-  : `Tu connais déjà ${firstName}. Ne commence jamais par une salutation — plonge directement dans la réponse.`}
-
-Pour tout prix d'un actif (action, crypto, indice, ETF, devise), cherche avec web_search avant de répondre. Tu ne cites jamais un prix de mémoire, même approximatif — tes données d'entraînement sont périmées. Une fois le prix obtenu, mentionne la source et l'heure. Si la recherche échoue, dis-le clairement sans inventer.
-
-Quand tu mentionnes une action ou une crypto, termine toujours ta réponse par le tag [CHART:SYMBOLE]. Par exemple : [CHART:BTC-USD], [CHART:AAPL], [CHART:NVDA]. Ne renvoie jamais vers un site externe — l'application affiche les graphiques directement.
-
-Symboles crypto : BTC-USD, ETH-USD, SOL-USD, BNB-USD, XRP-USD, DOGE-USD, AVAX-USD, ADA-USD, LINK-USD, MATIC-USD. Symboles actions : AAPL, MSFT, TSLA, AMZN, GOOGL, NVDA, META, NFLX, SHOP, COIN, JPM, BAC, GS, V, MA, AMD.`;
-
-    // ── Messages for Claude ───────────────────────────────────────────────────
-    const claudeMessages: { role: 'user' | 'assistant'; content: string }[] = [
-      ...history.map((m) => ({
-        role:    m.role as 'user' | 'assistant',
-        content: m.content as string,
-      })),
-      { role: 'user', content: message },
-    ];
-
-    // ── Model routing ─────────────────────────────────────────────────────────
-    const useSonnet      = needsSonnet(message, level);
-    const selectedModel  = useSonnet ? 'claude-sonnet-4-6' : 'claude-haiku-4-5';
-    const selectedTokens = useSonnet ? 1500 : 800;
-    console.log(`[chat] Routing: ${useSonnet ? 'SONNET' : 'HAIKU'} for: "${message.slice(0, 50)}"`);
-
-    // ── Stream ────────────────────────────────────────────────────────────────
-    const stream = await anthropic.messages.stream({
-      model:      selectedModel,
-      max_tokens: selectedTokens,
-      system:     systemPrompt,
-      tools:      [{ type: 'web_search_20250305', name: 'web_search' }],
-      messages:   claudeMessages,
+    // ── Save user message BEFORE calling Claude ───────────────────────────────
+    await supabaseAdmin.from('conversations').insert({
+      client_id: user.id,
+      role:      'user',
+      content:   message,
     });
 
+    // ── System prompt ─────────────────────────────────────────────────────────
+    const systemPrompt = `Tu es FinanceAI, le conseiller financier personnel autonome de ${firstName}.
+
+PERSONNALITÉ :
+- Tu parles comme un vrai conseiller humain qui connaît son client depuis longtemps : chaleureux, direct, jamais condescendant.
+- Tu vas droit au but${level === 'expert' ? ` — ${firstName} maîtrise le vocabulaire technique.` : ', pas de jargon inutile.'}
+- Tu réponds uniquement en ${langLabel}.
+- Pas de listes à puces, pas de titres markdown — du texte naturel, comme si tu parlais en face à face.
+${isFirstMessage
+  ? `C'est votre premier échange. Accueille ${firstName} chaleureusement en UNE phrase, puis enchaîne directement sur sa question.`
+  : `Tu connais déjà ${firstName}. NE COMMENCE JAMAIS par une salutation — plonge directement dans la réponse.`}
+
+RAISONNEMENT AUTONOME :
+- Avant de répondre, réfléchis à quelles informations tu as besoin.
+- Utilise les outils pour obtenir des données réelles. Ne JAMAIS inventer un chiffre, un prix, un fait.
+- Pour une question sur le portefeuille → get_user_portfolio + calculate_portfolio_performance
+- Pour un prix → get_stock_price (ou web_search si Yahoo échoue)
+- Pour une décision d'investissement → get_user_portfolio + get_client_profile + get_stock_price
+- Pour des actualités → get_recent_news ou web_search
+- Pour comprendre le marché → get_agent_memory
+- Pour l'état émotionnel → detect_user_mood en début de conversation
+
+CONNAISSANCE DU CLIENT :
+- Profil de ${firstName} : risque ${risk}, niveau ${level}, devise ${currency}.
+- Si tu apprends quelque chose d'important sur ses objectifs, peurs ou préférences → save_client_insight.
+
+GRAPHIQUES :
+- Quand tu mentionnes une action ou crypto, termine par [CHART:SYMBOLE] (ex: [CHART:AAPL], [CHART:BTC-USD]).
+
+SYSTÈME :
+- Un agent Python tourne 24/7, analyse les marchés toutes les heures, sauvegarde des insights dans agent_memory.
+- Date actuelle : ${today}.`;
+
+    // ── SSE Stream setup ──────────────────────────────────────────────────────
     const encoder = new TextEncoder();
-    let assistantContent = '';
+    const userId  = user.id;
 
     const readable = new ReadableStream({
       async start(controller) {
+        const send = (data: Record<string, unknown> | string) => {
+          const payload = typeof data === 'string' ? data : JSON.stringify(data);
+          controller.enqueue(encoder.encode(`data: ${payload}\n\n`));
+        };
+
         try {
-          for await (const chunk of stream) {
-            if (
-              chunk.type === 'content_block_delta' &&
-              chunk.delta.type === 'text_delta'
-            ) {
-              assistantContent += chunk.delta.text;
-              controller.enqueue(
-                encoder.encode(`data: ${JSON.stringify({ text: chunk.delta.text })}\n\n`)
+          // Build initial messages array for Claude
+          const messages: Anthropic.MessageParam[] = [
+            ...history.map((m) => ({
+              role:    m.role as 'user' | 'assistant',
+              content: m.content as string,
+            })),
+            { role: 'user', content: message },
+          ];
+
+          const MAX_ITERATIONS = 5;
+          let finalAssistantText = '';
+
+          // ── ReAct loop ────────────────────────────────────────────────────
+          for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
+            const stream = anthropic.messages.stream({
+              model:     'claude-sonnet-4-6',
+              max_tokens: 2000,
+              system:    systemPrompt,
+              tools:     ALL_TOOLS,
+              messages,
+            });
+
+            // Stream text deltas to client in real time
+            for await (const chunk of stream) {
+              if (
+                chunk.type === 'content_block_delta' &&
+                chunk.delta.type === 'text_delta'
+              ) {
+                finalAssistantText += chunk.delta.text;
+                send({ text: chunk.delta.text });
+              }
+            }
+
+            // Get the complete response after streaming
+            const finalMsg = await stream.finalMessage();
+
+            // Append assistant turn to messages for next iteration
+            messages.push({ role: 'assistant', content: finalMsg.content });
+
+            // ── Done — no more tool calls ─────────────────────────────────
+            if (finalMsg.stop_reason === 'end_turn' || finalMsg.stop_reason === 'max_tokens') {
+              break;
+            }
+
+            // ── Tool use — execute and loop ───────────────────────────────
+            if (finalMsg.stop_reason === 'tool_use') {
+              const toolUseBlocks = finalMsg.content.filter(
+                (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use'
               );
-            }
-          }
 
-          // ── Save BEFORE [DONE] — prevents serverless kill ─────────────────
-          if (assistantContent) {
-            const cleanContent = stripMarkdown(assistantContent);
-            const { error: saveError } = await supabaseAdmin
-              .from('conversations')
-              .insert([
-                { client_id: user.id, role: 'user',      content: message      },
-                { client_id: user.id, role: 'assistant', content: cleanContent },
-              ]);
-            if (saveError) {
-              console.error('[chat] save error:', saveError.message, saveError.code);
+              const toolResults: Anthropic.ToolResultBlockParam[] = [];
+
+              for (const toolCall of toolUseBlocks) {
+                // Server-side tools (web_search) are handled by Anthropic — no execution needed
+                if (toolCall.name === 'web_search') {
+                  send({ type: 'tool_start', name: 'web_search' });
+                  send({ type: 'tool_end',   name: 'web_search', success: true });
+                  continue;
+                }
+
+                send({ type: 'tool_start', name: toolCall.name });
+
+                let result: unknown;
+                try {
+                  result = await executeToolByName(
+                    toolCall.name,
+                    (toolCall.input as Record<string, unknown>) ?? {},
+                    userId
+                  );
+                  send({ type: 'tool_end', name: toolCall.name, success: true });
+                } catch (e) {
+                  result = { error: String(e) };
+                  send({ type: 'tool_end', name: toolCall.name, success: false });
+                  console.error(`[chat] tool error [${toolCall.name}]:`, e);
+                }
+
+                toolResults.push({
+                  type:        'tool_result',
+                  tool_use_id: toolCall.id,
+                  content:     JSON.stringify(result),
+                });
+              }
+
+              // Feed results back to Claude for the next iteration
+              if (toolResults.length > 0) {
+                messages.push({ role: 'user', content: toolResults });
+              } else {
+                // All tools were server-side — Claude already has results, break
+                break;
+              }
             } else {
-              console.log(`[chat] saved — user=${user.id} chars=${cleanContent.length}`);
+              // Unknown stop reason
+              break;
             }
           }
 
-          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          // ── Save assistant response ───────────────────────────────────────
+          if (finalAssistantText) {
+            const clean = stripMarkdown(finalAssistantText);
+            const { error: saveErr } = await supabaseAdmin.from('conversations').insert({
+              client_id: userId,
+              role:      'assistant',
+              content:   clean,
+            });
+            if (saveErr) {
+              console.error('[chat] save error:', saveErr.message, saveErr.code);
+            } else {
+              console.log(`[chat] saved — user=${userId} chars=${clean.length}`);
+            }
+          }
+
+          send('[DONE]');
+
         } catch (error) {
-          console.error('[chat] stream error:', error);
-          controller.error(error);
+          console.error('[chat] ReAct loop error:', error);
+          send({ type: 'error', message: 'Erreur serveur' });
+          send('[DONE]');
         } finally {
           controller.close();
         }
@@ -209,6 +281,7 @@ Symboles crypto : BTC-USD, ETH-USD, SOL-USD, BNB-USD, XRP-USD, DOGE-USD, AVAX-US
         Connection:      'keep-alive',
       },
     });
+
   } catch (error) {
     console.error('[chat] API error:', error);
     return new Response(JSON.stringify({ error: 'Erreur serveur' }), { status: 500 });
