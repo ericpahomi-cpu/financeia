@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
         .eq('client_id', user.id)
         .not('role', 'is', null)
         .order('created_at', { ascending: true })
-        .limit(20),
+        .limit(6),
       supabaseAdmin
         .from('user_preferences')
         .select('language, level, risk_profile, currency')
@@ -160,14 +160,14 @@ SYSTÈME :
             { role: 'user', content: message },
           ];
 
-          const MAX_ITERATIONS = 5;
+          const MAX_ITERATIONS = 3;
           let finalAssistantText = '';
 
           // ── ReAct loop ────────────────────────────────────────────────────
           for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
             const stream = anthropic.messages.stream({
-              model:     'claude-sonnet-4-6',
-              max_tokens: 2000,
+              model:     'claude-haiku-4-5',
+              max_tokens: 800,
               system:    systemPrompt,
               tools:     ALL_TOOLS,
               messages,
