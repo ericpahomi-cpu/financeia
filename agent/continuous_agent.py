@@ -28,6 +28,10 @@ UA  = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
 # Global indicators always included in every scan for macro context
 GLOBAL_INDICATORS = ['SPY', 'QQQ', 'BTC-USD', 'ETH-USD', '^VIX', 'GLD']
 
+# Cache des prix : symbole → (data, timestamp)
+_price_cache: dict[str, tuple[dict, float]] = {}
+_PRICE_CACHE_TTL = 300  # 5 minutes
+
 # ─── Yahoo Finance — session with crumb auth ──────────────────────────────────
 
 _yf = requests.Session()
@@ -63,32 +67,54 @@ def get_crumb() -> str | None:
 
 
 def get_prices_batch(symbols: list[str]) -> list[dict]:
-    """Batch price fetch via v7 (crumb) → falls back to v8 per-symbol."""
+    """Batch price fetch via v7 (crumb) → falls back to v8 per-symbol. Results cached 5 min."""
     if not symbols:
         return []
+
+    # Vérifie le cache
+    now_ts = time.time()
+    cached_results: list[dict] = []
+    symbols_to_fetch: list[str] = []
+    for sym in symbols:
+        if sym in _price_cache:
+            data, ts = _price_cache[sym]
+            if now_ts - ts < _PRICE_CACHE_TTL:
+                cached_results.append(data)
+                continue
+        symbols_to_fetch.append(sym)
+
+    if not symbols_to_fetch:
+        return cached_results
+
     crumb = get_crumb()
+    fresh_results: list[dict] = []
     if crumb:
         try:
             url = (
                 'https://query1.finance.yahoo.com/v7/finance/quote'
-                f'?symbols={requests.utils.quote(",".join(symbols))}'
+                f'?symbols={requests.utils.quote(",".join(symbols_to_fetch))}'
                 f'&formatted=false&crumb={requests.utils.quote(crumb)}'
             )
             r = _yf.get(url, timeout=15)
             if r.ok:
                 results = r.json().get('quoteResponse', {}).get('result', [])
                 if results:
-                    return [_quote_to_dict(q) for q in results]
+                    fresh_results = [_quote_to_dict(q) for q in results]
         except Exception as e:
             log.warning('v7 batch error: %s', e)
 
-    # Fallback: parallel v8
-    out = []
-    for sym in symbols:
-        d = get_price_v8(sym)
-        if d:
-            out.append(d)
-    return out
+    # Fallback: parallel v8 for any symbol not returned by v7
+    if not fresh_results:
+        for sym in symbols_to_fetch:
+            d = get_price_v8(sym)
+            if d:
+                fresh_results.append(d)
+
+    # Sauvegarde dans le cache
+    for r in fresh_results:
+        _price_cache[r['symbol']] = (r, now_ts)
+
+    return cached_results + fresh_results
 
 
 def _quote_to_dict(q: dict) -> dict:
@@ -269,6 +295,15 @@ def autonomous_market_scan():
     """
     log.info('▶ Autonomous market scan...')
 
+    # Skip si marchés fermés ET pas une heure de pré/post-market
+    now = datetime.datetime.now(EST)
+    hour = now.hour
+    is_weekend = now.weekday() >= 5
+    is_night = hour < 6 or hour >= 21  # entre 21h et 6h EST
+    if is_weekend or is_night:
+        log.info('  Skipping scan — markets closed (weekend or night)')
+        return
+
     # 1. Collect all symbols: global indicators + every user's favourites
     user_ids = get_all_user_ids()
     all_symbols: set[str] = set(GLOBAL_INDICATORS)
@@ -357,7 +392,7 @@ Réponds UNIQUEMENT avec ce JSON valide — sans texte avant ou après :
 
     try:
         resp = ANTHROPIC_CLIENT.messages.create(
-            model='claude-sonnet-4-6',
+            model='claude-haiku-4-5',
             max_tokens=1000,
             system='Tu es un analyste quantitatif expert. Réponds UNIQUEMENT en JSON valide.',
             messages=[{'role': 'user', 'content': prompt}],
@@ -1207,8 +1242,8 @@ def send_daily_reports():
 
 # ─── Schedule ─────────────────────────────────────────────────────────────────
 
-schedule.every(30).minutes.do(autonomous_market_scan)
-schedule.every(60).minutes.do(refresh_news_cache)
+schedule.every().hour.at(':00').do(autonomous_market_scan)
+schedule.every(2).hours.do(refresh_news_cache)
 schedule.every(2).hours.do(scrape_reddit)
 schedule.every(6).hours.do(scrape_youtube_rss)
 schedule.every(6).hours.do(scrape_investor_signals)

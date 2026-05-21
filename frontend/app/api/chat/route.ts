@@ -21,6 +21,31 @@ const LANG_NAMES: Record<string, string> = {
   ro: 'română',
 };
 
+/** Route message to Sonnet (complex) or Haiku (simple). */
+function needsSonnet(msg: string, level: string = 'beginner'): boolean {
+  const COMPLEX_KEYWORDS = [
+    'analyse', 'analyser', 'stratégie', 'strategie',
+    'recommande', 'recommandation', 'recommander',
+    'compare', 'comparer', 'comparaison',
+    'portefeuille', 'portfolio',
+    'pronostic', 'prédiction', 'prévision',
+    'impact', 'conséquence', 'consequence',
+    'scénario', 'simulation', 'simuler',
+    'pourquoi', 'comment ça marche',
+    'devrais-je', 'dois-je',
+    'évalue', 'evaluation',
+    'optimise', 'optimiser',
+    'planifie', 'planification',
+    'diversifie', 'diversification',
+    'risque', 'risques',
+  ];
+  const SIMPLE_PATTERNS = /^(merci|ok|salut|bonjour|au revoir|à plus|bye|thanks|hello|hi|coucou|allô|allo|spasibo|gracias|hola|buna|multumesc)/i;
+  const lower = msg.toLowerCase().trim();
+  if (lower.length < 30 && SIMPLE_PATTERNS.test(lower)) return false;
+  if (level === 'expert') return true;
+  return COMPLEX_KEYWORDS.some((kw) => lower.includes(kw)) || msg.length > 150;
+}
+
 /** Strip markdown before storing or streaming to the client. Preserves [CHART:X] tags. */
 function stripMarkdown(text: string): string {
   return text
@@ -118,10 +143,16 @@ Symboles crypto : BTC-USD, ETH-USD, SOL-USD, BNB-USD, XRP-USD, DOGE-USD, AVAX-US
       { role: 'user', content: message },
     ];
 
+    // ── Model routing ─────────────────────────────────────────────────────────
+    const useSonnet      = needsSonnet(message, level);
+    const selectedModel  = useSonnet ? 'claude-sonnet-4-6' : 'claude-haiku-4-5';
+    const selectedTokens = useSonnet ? 1500 : 800;
+    console.log(`[chat] Routing: ${useSonnet ? 'SONNET' : 'HAIKU'} for: "${message.slice(0, 50)}"`);
+
     // ── Stream ────────────────────────────────────────────────────────────────
     const stream = await anthropic.messages.stream({
-      model:      'claude-sonnet-4-6',
-      max_tokens: 600,
+      model:      selectedModel,
+      max_tokens: selectedTokens,
       system:     systemPrompt,
       tools:      [{ type: 'web_search_20250305', name: 'web_search' }],
       messages:   claudeMessages,
