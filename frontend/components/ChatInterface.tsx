@@ -204,10 +204,12 @@ const WAVE_DATA = Array.from({ length: WAVE_COUNT }, (_, i) => ({
 
 // ── Premium Voice Overlay ─────────────────────────────────────────────────────
 function VoiceOverlay({
-  isOpen, voiceState, isTranscribing, interimTranscript, assistantText, onToggleMic, onClose,
+  isOpen, voiceState, isTranscribing, interimTranscript, assistantText,
+  overlayTicker, onToggleMic, onClose,
 }: {
   isOpen: boolean; voiceState: VoiceState; isTranscribing: boolean;
   interimTranscript: string; assistantText: string;
+  overlayTicker: string | null;
   onToggleMic: () => void; onClose: () => void;
 }) {
   if (!isOpen) return null;
@@ -217,15 +219,27 @@ function VoiceOverlay({
   const speaking   = voiceState === 'speaking';
 
   const statusText =
-    listening  ? 'Je vous écoute…'                           :
-    processing ? (isTranscribing ? 'Transcription…' : 'Réflexion…') :
-    speaking   ? 'Je vous réponds…'                          :
+    listening  ? 'Je vous écoute…'                                    :
+    processing ? (isTranscribing ? 'Transcription…' : 'Réflexion…')  :
+    speaking   ? 'Je vous réponds…'                                    :
                  'Parlez pour commencer';
 
   // Only show last 180 chars of response in overlay preview
   const previewText = stripMarkdown(assistantText)
     .replace(/\[CHART:[A-Z0-9.\-]+\]/gi, '')
     .slice(-180).trim();
+
+  // TradingView symbol resolution for overlay ticker
+  const isCryptoTicker = overlayTicker && (
+    overlayTicker.includes('-') ||
+    /^(BTC|ETH|SOL|BNB|ADA|XRP|DOGE|DOT|AVAX|MATIC|LINK|UNI|ATOM|LTC|SUI|APT|INJ|SEI|TIA|NEAR|TON|SHIB|TRX|PEPE|OP|ARB|FTM|SAND|MANA|AXS)$/i.test(overlayTicker)
+  );
+  const tvSymbol = overlayTicker
+    ? toTVSymbol(overlayTicker, isCryptoTicker ? 'crypto' : 'stock')
+    : null;
+
+  // Show chart when ticker is available and user is not currently speaking (listening)
+  const showChart = !!tvSymbol && !listening;
 
   return (
     <div
@@ -389,36 +403,56 @@ function VoiceOverlay({
         )}
       </div>
 
-      {/* ── Wave visualizer ── */}
-      <div
-        className="flex-shrink-0 flex items-end justify-center gap-0.5 px-6"
-        style={{ height: 72 }}
-      >
-        {WAVE_DATA.map(({ height, delay }, i) => (
+      {/* ── TradingView chart OR wave visualizer ── */}
+      {showChart ? (
+        /* ── Inline chart (shown when agent mentions a ticker) ── */
+        <div className="flex-shrink-0 px-4 pb-1" style={{ height: 232 }}>
+          {/* Ticker label bar */}
+          <div className="flex items-center gap-2 px-3 py-1.5 mb-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" style={{ boxShadow: '0 0 6px #10b981' }} />
+            <span className="text-white/60 text-xs font-mono tracking-wider">{overlayTicker}</span>
+            <span className="text-white/25 text-xs">{tvSymbol}</span>
+          </div>
+          {/* Chart */}
           <div
-            key={i}
-            style={{
-              flex: 1,
-              maxWidth: 6,
-              height,
-              borderRadius: 3,
-              backgroundColor: speaking
-                ? 'rgba(52,211,153,0.75)'
-                : listening
-                ? 'rgba(129,140,248,0.75)'
-                : 'rgba(255,255,255,0.2)',
-              transformOrigin: 'bottom',
-              transform: (listening || speaking) ? undefined : 'scaleY(0.12)',
-              animationName: (listening || speaking) ? 'voiceBar' : 'none',
-              animationDuration: speaking ? '0.5s' : '0.9s',
-              animationTimingFunction: 'ease-in-out',
-              animationIterationCount: 'infinite',
-              animationDelay: `${delay}ms`,
-              transition: (listening || speaking) ? 'none' : 'transform 0.5s ease, background-color 0.4s ease',
-            }}
-          />
-        ))}
-      </div>
+            className="rounded-xl overflow-hidden"
+            style={{ height: 200, border: '1px solid rgba(255,255,255,0.08)', background: '#0f0f1a' }}
+          >
+            <TradingViewWidget key={tvSymbol!} tvSymbol={tvSymbol!} height={200} />
+          </div>
+        </div>
+      ) : (
+        /* ── Wave visualizer (default) ── */
+        <div
+          className="flex-shrink-0 flex items-end justify-center gap-0.5 px-6"
+          style={{ height: 72 }}
+        >
+          {WAVE_DATA.map(({ height, delay }, i) => (
+            <div
+              key={i}
+              style={{
+                flex: 1,
+                maxWidth: 6,
+                height,
+                borderRadius: 3,
+                backgroundColor: speaking
+                  ? 'rgba(52,211,153,0.75)'
+                  : listening
+                  ? 'rgba(129,140,248,0.75)'
+                  : 'rgba(255,255,255,0.2)',
+                transformOrigin: 'bottom',
+                transform: (listening || speaking) ? undefined : 'scaleY(0.12)',
+                animationName: (listening || speaking) ? 'voiceBar' : 'none',
+                animationDuration: speaking ? '0.5s' : '0.9s',
+                animationTimingFunction: 'ease-in-out',
+                animationIterationCount: 'infinite',
+                animationDelay: `${delay}ms`,
+                transition: (listening || speaking) ? 'none' : 'transform 0.5s ease, background-color 0.4s ease',
+              }}
+            />
+          ))}
+        </div>
+      )}
 
       {/* ── Control button ── */}
       <div className="flex-shrink-0 flex flex-col items-center gap-3 py-8">
@@ -477,6 +511,7 @@ export default function ChatInterface() {
   const [isSpeaking, setIsSpeaking]               = useState(false);
   const [interimTranscript, setInterimTranscript] = useState('');
   const [voiceError, setVoiceError]               = useState('');
+  const [overlayTicker, setOverlayTicker]         = useState<string | null>(null);
   const voiceManagerRef     = useRef<VoiceManager | null>(null);
   const voiceOverlayOpenRef = useRef(false);
   const sendMessageRef      = useRef<(text: string) => Promise<void>>(async () => {});
@@ -570,6 +605,18 @@ export default function ChatInterface() {
     }, 500);
     return () => clearTimeout(timer);
   }, [voiceOverlayOpen, isLoading, isSpeaking, isListening]);
+
+  // ── Detect ticker in latest assistant message (shows chart in overlay) ─────
+  useEffect(() => {
+    if (!voiceOverlayOpen || !lastAssistantMsg) return;
+    const symbols = getChartSymbols(lastAssistantMsg);
+    setOverlayTicker(symbols[0] ?? null);
+  }, [lastAssistantMsg, voiceOverlayOpen]);
+
+  // ── Clear overlay ticker when user starts speaking (barge-in) ─────────────
+  useEffect(() => {
+    if (isListening) setOverlayTicker(null);
+  }, [isListening]);
 
   // ── Core streaming ───────────────────────────────────────────────────────────
   const streamResponse = async (
@@ -715,6 +762,7 @@ export default function ChatInterface() {
     voiceOverlayOpenRef.current = false;
     setVoiceOverlayOpen(false);
     setInterimTranscript('');
+    setOverlayTicker(null);
   };
 
   const toggleOverlayMic = () => {
@@ -749,6 +797,7 @@ export default function ChatInterface() {
         isTranscribing={isTranscribing}
         interimTranscript={interimTranscript}
         assistantText={lastAssistantMsg}
+        overlayTicker={overlayTicker}
         onToggleMic={toggleOverlayMic}
         onClose={closeVoiceOverlay}
       />
