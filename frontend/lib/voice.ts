@@ -76,13 +76,16 @@ export class VoiceManager {
     if (this._isListening) return;
 
     try {
-      // Request mic with noise suppression
+      // Request mic — aggressive voice isolation constraints
       this.stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          channelCount: 1,
-        },
+          echoCancellation:           true,  // cancel speaker feedback into mic
+          noiseSuppression:           true,  // filter background noise
+          autoGainControl:            true,  // normalise voice volume
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          suppressLocalAudioPlayback: true,  // prevent TTS/music bleed-back into mic
+          channelCount:               1,     // mono — reduces processing overhead
+        } as MediaTrackConstraints,
       });
 
       // AudioContext for real-time silence detection
