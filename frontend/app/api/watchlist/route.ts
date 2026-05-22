@@ -2,6 +2,10 @@ import Anthropic from '@anthropic-ai/sdk';
 import { NextResponse } from 'next/server';
 import { createClient as createAdmin } from '@supabase/supabase-js';
 
+// Force dynamic rendering — this route makes external calls (Supabase + Anthropic)
+// and must never be statically pre-rendered at build time on Vercel.
+export const dynamic = 'force-dynamic';
+
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
   defaultHeaders: { 'anthropic-beta': 'web-search-2025-03-05' },
