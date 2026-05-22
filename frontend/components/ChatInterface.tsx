@@ -14,22 +14,24 @@ interface Message {
   content: string;
 }
 
+type VoiceState = 'idle' | 'listening' | 'processing' | 'speaking';
+
 // ── Tool display labels ───────────────────────────────────────────────────────
 const TOOL_LABELS: Record<string, string> = {
-  get_stock_price:                '📈 Prix en temps réel',
-  get_user_portfolio:             '💼 Portefeuille',
-  get_user_favorites:             '⭐ Favoris',
-  get_user_predictions:           '🔮 Pronostics',
-  get_agent_memory:               '🧠 Mémoire agent',
-  get_recent_news:                '📰 Actualités',
-  calculate_portfolio_performance:'📊 Performance',
-  save_client_insight:            '💾 Sauvegarde',
-  get_client_profile:             '👤 Profil',
-  get_conversation_history:       '💬 Historique',
-  detect_user_mood:               '🎭 Analyse',
-  compare_to_similar_clients:     '🔄 Comparaison',
-  simulate_scenario:              '🔮 Simulation',
-  web_search:                     '🔍 Recherche web',
+  get_stock_price:                 '📈 Prix en temps réel',
+  get_user_portfolio:              '💼 Portefeuille',
+  get_user_favorites:              '⭐ Favoris',
+  get_user_predictions:            '🔮 Pronostics',
+  get_agent_memory:                '🧠 Mémoire agent',
+  get_recent_news:                 '📰 Actualités',
+  calculate_portfolio_performance: '📊 Performance',
+  save_client_insight:             '💾 Sauvegarde',
+  get_client_profile:              '👤 Profil',
+  get_conversation_history:        '💬 Historique',
+  detect_user_mood:                '🎭 Analyse',
+  compare_to_similar_clients:      '🔄 Comparaison',
+  simulate_scenario:               '🔮 Simulation',
+  web_search:                      '🔍 Recherche web',
 };
 
 // ── Markdown stripper ─────────────────────────────────────────────────────────
@@ -49,6 +51,7 @@ function stripMarkdown(text: string): string {
       m.replace(/^```[^\n]*\n?/, '').replace(/\n?```$/, ''))
     .replace(/`([^`\n]+)`/g, '$1')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/\[CHART:[A-Z0-9.\-]+\]/gi, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
@@ -79,8 +82,7 @@ function BubbleText({ content }: { content: string }) {
   const segments = parseSegments(clean);
   const textOnly = segments
     .filter((s): s is { type: 'text'; text: string } => s.type === 'text')
-    .map((s) => s.text)
-    .join('');
+    .map((s) => s.text).join('');
   return <span style={{ whiteSpace: 'pre-wrap' }}>{textOnly}</span>;
 }
 
@@ -112,37 +114,180 @@ function ChartPlaceholder() {
 }
 
 function getChartSymbols(content: string): string[] {
-  const clean    = stripMarkdown(content);
-  const segments = parseSegments(clean);
-  return segments
+  return parseSegments(stripMarkdown(content))
     .filter((s): s is { type: 'chart'; symbol: string } => s.type === 'chart')
     .map((s) => s.symbol);
 }
 
-// ── MicButton ─────────────────────────────────────────────────────────────────
-function MicButton({ isListening, onClick, disabled }: {
-  isListening: boolean;
-  onClick: () => void;
-  disabled: boolean;
-}) {
+// ── Sound wave bars (ChatGPT-style) ───────────────────────────────────────────
+const BAR_HEIGHTS = [28, 46, 64, 52, 36, 58, 30];
+const BAR_DELAYS  = [0, 110, 220, 155, 270, 85, 195];
+
+function SoundBars({ active, fast }: { active: boolean; fast: boolean }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-label={isListening ? 'Arrêter l\'écoute' : 'Démarrer l\'écoute vocale'}
-      className={`relative flex-shrink-0 w-11 h-11 rounded-xl flex items-center justify-center transition-all ${
-        isListening
-          ? 'bg-red-500 hover:bg-red-600 text-white shadow-lg'
-          : 'bg-[#f3f4f6] hover:bg-indigo-100 text-[#6b7280] hover:text-indigo-600'
-      } disabled:opacity-40 disabled:cursor-not-allowed`}
+    <div className="flex items-end justify-center gap-1.5" style={{ height: 68 }}>
+      {BAR_HEIGHTS.map((h, i) => (
+        <div
+          key={i}
+          style={{
+            width: 4,
+            height: h,
+            borderRadius: 4,
+            backgroundColor: 'rgba(255,255,255,0.88)',
+            transformOrigin: 'bottom',
+            transform: active ? undefined : 'scaleY(0.12)',
+            animationName: active ? 'voiceBar' : 'none',
+            animationDuration: fast ? '0.45s' : '0.85s',
+            animationTimingFunction: 'ease-in-out',
+            animationIterationCount: 'infinite',
+            animationDelay: `${BAR_DELAYS[i]}ms`,
+            transition: active ? 'none' : 'transform 0.4s ease',
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ── Voice overlay (full-screen, ChatGPT-style) ────────────────────────────────
+function VoiceOverlay({
+  isOpen,
+  voiceState,
+  interimTranscript,
+  assistantText,
+  onToggleMic,
+  onClose,
+}: {
+  isOpen:             boolean;
+  voiceState:         VoiceState;
+  interimTranscript:  string;
+  assistantText:      string;
+  onToggleMic:        () => void;
+  onClose:            () => void;
+}) {
+  if (!isOpen) return null;
+
+  const listening  = voiceState === 'listening';
+  const processing = voiceState === 'processing';
+  const speaking   = voiceState === 'speaking';
+
+  const statusText =
+    listening  ? 'Je vous écoute…'        :
+    processing ? 'Réflexion en cours…'    :
+    speaking   ? 'Je vous réponds…'       :
+                 'Appuyez sur le micro pour parler';
+
+  const displayText = stripMarkdown(assistantText).slice(-220);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center select-none"
+      style={{ background: 'rgba(4, 4, 16, 0.97)', backdropFilter: 'blur(16px)' }}
     >
-      {/* Pulse ring when listening */}
-      {isListening && (
-        <span className="absolute inset-0 rounded-xl bg-red-400 animate-ping opacity-50" />
+      {/* Keyframes injected locally */}
+      <style dangerouslySetInnerHTML={{ __html: `
+        @keyframes voiceBar {
+          0%, 100% { transform: scaleY(0.12); }
+          50%       { transform: scaleY(1);    }
+        }
+        @keyframes orbListen {
+          0%, 100% {
+            box-shadow: 0 0 0 0 rgba(129,140,248,0.55), 0 0 50px 12px rgba(99,102,241,0.25);
+            transform: scale(1);
+          }
+          50% {
+            box-shadow: 0 0 0 22px rgba(129,140,248,0), 0 0 80px 24px rgba(99,102,241,0.45);
+            transform: scale(1.07);
+          }
+        }
+        @keyframes orbThink {
+          0%   { transform: rotate(0deg)   scale(0.96); opacity: 0.75; }
+          50%  { transform: rotate(180deg) scale(1.04); opacity: 1;    }
+          100% { transform: rotate(360deg) scale(0.96); opacity: 0.75; }
+        }
+        @keyframes orbSpeak {
+          0%, 100% {
+            box-shadow: 0 0 0 0 rgba(52,211,153,0.55), 0 0 50px 12px rgba(16,185,129,0.25);
+            transform: scale(1);
+          }
+          50% {
+            box-shadow: 0 0 0 18px rgba(52,211,153,0), 0 0 80px 24px rgba(16,185,129,0.45);
+            transform: scale(1.09);
+          }
+        }
+        .orb-listen { animation: orbListen 1.7s ease-in-out infinite; }
+        .orb-think  { animation: orbThink  2.2s linear    infinite; }
+        .orb-speak  { animation: orbSpeak  0.65s ease-in-out infinite; }
+      `}} />
+
+      {/* ── Close ── */}
+      <button
+        onClick={onClose}
+        aria-label="Quitter le mode vocal"
+        className="absolute top-6 right-6 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/60 hover:text-white transition-all text-xl font-light"
+      >
+        ✕
+      </button>
+
+      {/* ── Orb ── */}
+      <div
+        className={`w-36 h-36 rounded-full flex items-center justify-center ${
+          listening  ? 'bg-gradient-to-br from-indigo-500 to-violet-700 orb-listen' :
+          processing ? 'bg-gradient-to-br from-slate-500  to-indigo-600 orb-think'  :
+          speaking   ? 'bg-gradient-to-br from-emerald-400 to-teal-600  orb-speak'  :
+                       'bg-gradient-to-br from-indigo-400  to-violet-600'
+        }`}
+      >
+        <SoundBars active={listening || speaking} fast={speaking} />
+      </div>
+
+      {/* ── Status ── */}
+      <p className="mt-9 text-white text-lg font-medium tracking-wide">
+        {statusText}
+      </p>
+
+      {/* ── Interim transcript ── */}
+      {interimTranscript && (
+        <p
+          aria-live="polite"
+          className="mt-3 text-white/55 text-base italic px-10 text-center max-w-sm leading-snug"
+        >
+          &ldquo;{interimTranscript}&rdquo;
+        </p>
       )}
-      <span className="relative text-lg">{isListening ? '🔴' : '🎤'}</span>
-    </button>
+
+      {/* ── Last agent response (streaming preview) ── */}
+      {(speaking || processing) && displayText && (
+        <p className="mt-4 text-white/40 text-sm px-12 text-center max-w-md leading-relaxed line-clamp-3">
+          {displayText}
+        </p>
+      )}
+
+      {/* ── Controls ── */}
+      <div className="mt-14 flex flex-col items-center gap-4">
+        <button
+          onClick={onToggleMic}
+          aria-label={listening ? "Arrêter l'écoute" : speaking ? "Interrompre l'agent" : "Parler"}
+          className={`w-16 h-16 rounded-full flex items-center justify-center text-2xl transition-all shadow-xl ${
+            listening
+              ? 'bg-red-500 hover:bg-red-600 shadow-red-500/40'
+              : speaking
+              ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/40'
+              : 'bg-white/15 hover:bg-white/25'
+          }`}
+        >
+          {listening ? '⏹' : speaking ? '⏸' : '🎤'}
+        </button>
+
+        <p className="text-white/22 text-xs tracking-wide">
+          {listening
+            ? 'Silence détecté → envoi automatique'
+            : speaking
+            ? 'Appuyez pour interrompre'
+            : 'La conversation continue automatiquement'}
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -150,7 +295,7 @@ function MicButton({ isListening, onClick, disabled }: {
 export default function ChatInterface() {
   const { t } = useLanguage();
 
-  // ── Chat state ──────────────────────────────────────────────────────────────
+  // ── Chat state ───────────────────────────────────────────────────────────────
   const [messages, setMessages]           = useState<Message[]>([]);
   const [input, setInput]                 = useState('');
   const [isLoading, setIsLoading]         = useState(false);
@@ -159,29 +304,33 @@ export default function ChatInterface() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef    = useRef<HTMLTextAreaElement>(null);
 
-  // ── Voice state ─────────────────────────────────────────────────────────────
+  // ── Voice state ──────────────────────────────────────────────────────────────
   const [voiceSupported, setVoiceSupported]       = useState(false);
-  const [voiceEnabled, setVoiceEnabled]           = useState(false);
-  const [autoSpeak, setAutoSpeak]                 = useState(true);
+  const [voiceOverlayOpen, setVoiceOverlayOpen]   = useState(false);
   const [isListening, setIsListening]             = useState(false);
   const [isSpeaking, setIsSpeaking]               = useState(false);
   const [interimTranscript, setInterimTranscript] = useState('');
   const [voiceError, setVoiceError]               = useState('');
-  const [noVoiceMsg, setNoVoiceMsg]               = useState('');
-  const voiceManagerRef = useRef<VoiceManager | null>(null);
+  const voiceManagerRef     = useRef<VoiceManager | null>(null);
+  const voiceOverlayOpenRef = useRef(false);
+  const sendMessageRef      = useRef<(text: string) => Promise<void>>(async () => {});
 
-  // Ref mirrors so closures always see latest values
-  const autoSpeakRef    = useRef(autoSpeak);
-  const sendMessageRef  = useRef<(text: string) => Promise<void>>(async () => {});
+  // Derived
+  const voiceState: VoiceState =
+    isLoading  ? 'processing' :
+    isSpeaking ? 'speaking'   :
+    isListening? 'listening'  :
+                 'idle';
 
-  useEffect(() => { autoSpeakRef.current = autoSpeak; }, [autoSpeak]);
+  const lastAssistantMsg =
+    [...messages].reverse().find((m) => m.role === 'assistant')?.content ?? '';
 
-  // ── Scroll to bottom ─────────────────────────────────────────────────────────
+  // ── Scroll ───────────────────────────────────────────────────────────────────
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // ── History ──────────────────────────────────────────────────────────────────
+  // ── Load history ─────────────────────────────────────────────────────────────
   useEffect(() => {
     fetch('/api/conversations')
       .then((r) => r.json())
@@ -206,26 +355,22 @@ export default function ChatInterface() {
 
   // ── VoiceManager init ────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!isVoiceSupported()) {
-      setVoiceSupported(false);
-      return;
-    }
+    if (!isVoiceSupported()) return;
     setVoiceSupported(true);
 
-    let vm: VoiceManager;
     const initVoice = async () => {
       let lang: VoiceLanguage = 'fr';
       try {
         const res = await fetch('/api/user-settings');
         if (res.ok) {
           const data = await res.json();
-          if (data.language && ['fr','en','es','ru','ro'].includes(data.language)) {
+          if (['fr','en','es','ru','ro'].includes(data.language)) {
             lang = data.language as VoiceLanguage;
           }
         }
       } catch { /* use default */ }
 
-      vm = new VoiceManager(lang);
+      const vm = new VoiceManager(lang);
 
       vm.onTranscript = (text, isFinal) => {
         setInterimTranscript(isFinal ? '' : text);
@@ -241,12 +386,24 @@ export default function ChatInterface() {
         setVoiceError(err);
         setTimeout(() => setVoiceError(''), 6000);
       };
+
       voiceManagerRef.current = vm;
     };
 
     initVoice();
     return () => { voiceManagerRef.current?.dispose(); };
   }, []);
+
+  // ── Auto-restart listening when overlay is open and idle ─────────────────────
+  useEffect(() => {
+    if (!voiceOverlayOpen || isLoading || isSpeaking || isListening) return;
+    const timer = setTimeout(() => {
+      if (voiceOverlayOpenRef.current && voiceManagerRef.current) {
+        voiceManagerRef.current.startListening();
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [voiceOverlayOpen, isLoading, isSpeaking, isListening]);
 
   // ── Core streaming ────────────────────────────────────────────────────────────
   const streamResponse = async (
@@ -264,16 +421,12 @@ export default function ChatInterface() {
       if (done) break;
 
       const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
-
-      for (const line of lines) {
+      for (const line of chunk.split('\n')) {
         if (!line.startsWith('data: ')) continue;
         const raw = line.slice(6);
         if (raw === '[DONE]') break;
         try {
           const parsed = JSON.parse(raw);
-
-          // Text delta
           if (parsed.text) {
             assistantMessage += parsed.text;
             setMessages((prev) => {
@@ -283,8 +436,6 @@ export default function ChatInterface() {
             });
             onDelta?.(parsed.text);
           }
-
-          // Tool badges
           if (parsed.type === 'tool_start' && parsed.name) {
             const label = TOOL_LABELS[parsed.name] ?? parsed.name;
             setActiveTools((prev) => prev.includes(label) ? prev : [...prev, label]);
@@ -293,13 +444,12 @@ export default function ChatInterface() {
             const label = TOOL_LABELS[parsed.name] ?? parsed.name;
             setActiveTools((prev) => prev.filter((l) => l !== label));
           }
-
-        } catch { /* ignore partial JSON */ }
+        } catch { /* ignore */ }
       }
     }
   };
 
-  // ── sendMessage (extracted so voice + keyboard both use it) ───────────────────
+  // ── sendMessage ───────────────────────────────────────────────────────────────
   const sendMessage = useCallback(async (text: string) => {
     if (!text.trim() || isLoading) return;
 
@@ -315,13 +465,12 @@ export default function ChatInterface() {
       });
       if (!response.ok || !response.body) throw new Error('Erreur serveur');
 
-      const shouldSpeak = autoSpeakRef.current && voiceManagerRef.current;
+      // In overlay mode, always speak. Outside overlay, no TTS.
+      const shouldSpeak = voiceOverlayOpenRef.current && !!voiceManagerRef.current;
       await streamResponse(
         response,
         shouldSpeak ? (delta) => voiceManagerRef.current?.speakStreaming(delta) : undefined
       );
-
-      // Flush any remaining buffered text that didn't end with punctuation
       if (shouldSpeak) voiceManagerRef.current?.flushStreamBuffer();
 
     } catch {
@@ -336,9 +485,10 @@ export default function ChatInterface() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading]);
 
-  // Keep ref fresh after every render so VoiceManager callback always calls latest version
+  // Keep ref fresh so VoiceManager callbacks always call latest sendMessage
   useEffect(() => { sendMessageRef.current = sendMessage; });
 
+  // ── Onboarding ────────────────────────────────────────────────────────────────
   const triggerOnboarding = async () => {
     setIsLoading(true);
     try {
@@ -354,6 +504,7 @@ export default function ChatInterface() {
     }
   };
 
+  // ── Text input handlers ───────────────────────────────────────────────────────
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
     const text = input.trim();
@@ -366,28 +517,36 @@ export default function ChatInterface() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(); }
   };
 
-  // ── Voice toggle ──────────────────────────────────────────────────────────────
-  const toggleVoice = () => {
+  // ── Voice overlay controls ────────────────────────────────────────────────────
+  const openVoiceOverlay = () => {
     if (!voiceSupported) {
-      setNoVoiceMsg('Le mode vocal n\'est pas supporté par votre navigateur. Utilisez Chrome ou Edge.');
-      setTimeout(() => setNoVoiceMsg(''), 5000);
+      setVoiceError('Le mode vocal nécessite Chrome ou Edge.');
+      setTimeout(() => setVoiceError(''), 4000);
       return;
     }
-    const next = !voiceEnabled;
-    setVoiceEnabled(next);
-    if (!next) {
-      voiceManagerRef.current?.stopListening();
-      voiceManagerRef.current?.stopSpeaking();
-    }
+    voiceOverlayOpenRef.current = true;
+    setVoiceOverlayOpen(true);
+    voiceManagerRef.current?.startListening();
   };
 
-  const toggleMic = () => {
-    if (!voiceManagerRef.current) return;
+  const closeVoiceOverlay = () => {
+    voiceManagerRef.current?.stopListening();
+    voiceManagerRef.current?.stopSpeaking();
+    voiceOverlayOpenRef.current = false;
+    setVoiceOverlayOpen(false);
+    setInterimTranscript('');
+  };
+
+  const toggleOverlayMic = () => {
+    const vm = voiceManagerRef.current;
+    if (!vm) return;
     if (isListening) {
-      voiceManagerRef.current.stopListening();
+      vm.stopListening();
+    } else if (isSpeaking) {
+      vm.stopSpeaking();
+      // Auto-restart will fire via useEffect after 500ms
     } else {
-      if (isSpeaking) voiceManagerRef.current.stopSpeaking();
-      voiceManagerRef.current.startListening();
+      vm.startListening();
     }
   };
 
@@ -407,69 +566,15 @@ export default function ChatInterface() {
   return (
     <div className="flex flex-col h-full">
 
-      {/* ── Voice mode bar ────────────────────────────────────────────────────── */}
-      <div className="flex-shrink-0 px-4 py-2 border-b border-[#f3f4f6] bg-white flex items-center justify-between gap-3 flex-wrap">
-
-        {/* Left: mode toggle */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-[#6b7280] font-medium">🎙 Mode vocal</span>
-          <button
-            onClick={toggleVoice}
-            aria-label={voiceEnabled ? 'Désactiver le mode vocal' : 'Activer le mode vocal'}
-            className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
-              voiceEnabled ? 'bg-indigo-600' : 'bg-[#d1d5db]'
-            } ${!voiceSupported ? 'opacity-40 cursor-not-allowed' : ''}`}
-          >
-            <span
-              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ${
-                voiceEnabled ? 'translate-x-4' : 'translate-x-0'
-              }`}
-            />
-          </button>
-        </div>
-
-        {/* Right: auto-speak toggle (only when voice enabled) */}
-        {voiceEnabled && (
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-[#6b7280]">Réponses vocales</span>
-            <button
-              onClick={() => {
-                const next = !autoSpeak;
-                setAutoSpeak(next);
-                if (!next) voiceManagerRef.current?.stopSpeaking();
-              }}
-              aria-label={autoSpeak ? 'Désactiver les réponses vocales' : 'Activer les réponses vocales'}
-              className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${
-                autoSpeak ? 'bg-emerald-500' : 'bg-[#d1d5db]'
-              }`}
-            >
-              <span
-                className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ${
-                  autoSpeak ? 'translate-x-4' : 'translate-x-0'
-                }`}
-              />
-            </button>
-
-            {/* Interrupt button */}
-            {isSpeaking && (
-              <button
-                onClick={() => voiceManagerRef.current?.stopSpeaking()}
-                aria-label="Interrompre l'agent"
-                className="flex items-center gap-1 px-2.5 py-1 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-medium hover:bg-red-100 transition-colors"
-              >
-                ⏹ Interrompre
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* ── Error banners ─────────────────────────────────────────────────────── */}
-      {(voiceError || noVoiceMsg) && (
-        <div className="flex-shrink-0 mx-4 mt-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-xs" role="alert">
-          {voiceError || noVoiceMsg}
-        </div>
-      )}
+      {/* ── Voice overlay (portal-style, fixed position) ─────────────────────── */}
+      <VoiceOverlay
+        isOpen={voiceOverlayOpen}
+        voiceState={voiceState}
+        interimTranscript={interimTranscript}
+        assistantText={lastAssistantMsg}
+        onToggleMic={toggleOverlayMic}
+        onClose={closeVoiceOverlay}
+      />
 
       {/* ── Messages ──────────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
@@ -485,7 +590,6 @@ export default function ChatInterface() {
                     AI
                   </div>
                 )}
-
                 <div
                   className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                     message.role === 'user'
@@ -505,7 +609,6 @@ export default function ChatInterface() {
                     </span>
                   )}
                 </div>
-
                 {message.role === 'user' && (
                   <div className="w-8 h-8 rounded-full bg-[#e5e7eb] flex items-center justify-center text-[#6b7280] text-xs font-bold flex-shrink-0 ml-2 mt-1">
                     Vous
@@ -541,30 +644,10 @@ export default function ChatInterface() {
         </div>
       )}
 
-      {/* ── Voice status bar ──────────────────────────────────────────────────── */}
-      {voiceEnabled && (isListening || isSpeaking || interimTranscript) && (
-        <div
-          aria-live="polite"
-          className="flex-shrink-0 mx-4 mb-2 px-3 py-2 rounded-xl border flex items-center gap-2 text-xs font-medium transition-all
-            bg-white border-[#e5e7eb]"
-        >
-          {isListening && (
-            <>
-              <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse flex-shrink-0" />
-              <span className="text-red-600">🎤 J&apos;écoute…</span>
-              {interimTranscript && (
-                <span className="text-[#9ca3af] italic truncate max-w-[60%]">
-                  &ldquo;{interimTranscript}&rdquo;
-                </span>
-              )}
-            </>
-          )}
-          {isSpeaking && !isListening && (
-            <>
-              <span className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse flex-shrink-0" />
-              <span className="text-indigo-600">🔊 L&apos;agent répond…</span>
-            </>
-          )}
+      {/* ── Voice error banner ────────────────────────────────────────────────── */}
+      {voiceError && (
+        <div className="flex-shrink-0 mx-4 mb-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-xs" role="alert">
+          {voiceError}
         </div>
       )}
 
@@ -576,28 +659,42 @@ export default function ChatInterface() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={
-              isListening
-                ? 'Parlez maintenant…'
-                : t.chat_placeholder
-            }
+            placeholder={t.chat_placeholder}
             rows={2}
             className="flex-1 bg-[#f8f9fa] border border-[#e5e7eb] rounded-xl px-4 py-3 text-sm text-[#1a1a1a] placeholder-[#9ca3af] focus:outline-none focus:border-indigo-400 resize-none transition-colors"
-            disabled={isLoading || isListening}
+            disabled={isLoading}
           />
 
-          {/* Mic button — only when voice is enabled */}
-          {voiceEnabled && (
-            <MicButton
-              isListening={isListening}
-              onClick={toggleMic}
-              disabled={isLoading}
-            />
+          {/* Mic button — always visible when voice supported */}
+          {voiceSupported && (
+            <button
+              type="button"
+              onClick={openVoiceOverlay}
+              aria-label="Activer le mode vocal"
+              className={`relative flex-shrink-0 w-11 h-11 rounded-xl flex items-center justify-center transition-all ${
+                voiceOverlayOpen
+                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/40'
+                  : 'bg-[#f3f4f6] hover:bg-indigo-50 text-[#6b7280] hover:text-indigo-600'
+              }`}
+            >
+              {voiceOverlayOpen && (
+                <span className="absolute inset-0 rounded-xl bg-indigo-500 animate-ping opacity-30" />
+              )}
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                className="relative w-5 h-5"
+              >
+                <path d="M12 1a4 4 0 0 1 4 4v6a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4z" />
+                <path d="M19 10a1 1 0 0 0-2 0 5 5 0 0 1-10 0 1 1 0 0 0-2 0 7 7 0 0 0 6 6.92V19H9a1 1 0 0 0 0 2h6a1 1 0 0 0 0-2h-2v-2.08A7 7 0 0 0 19 10z" />
+              </svg>
+            </button>
           )}
 
           <button
             type="submit"
-            disabled={!input.trim() || isLoading || isListening}
+            disabled={!input.trim() || isLoading}
             aria-label="Envoyer le message"
             className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-medium transition-colors flex-shrink-0"
           >
