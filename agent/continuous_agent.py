@@ -539,7 +539,7 @@ Réponds UNIQUEMENT avec ce JSON valide — sans texte avant ou après :
 
     try:
         resp = ANTHROPIC_CLIENT.messages.create(
-            model='claude-sonnet-4-6',
+            model='claude-haiku-4-5',
             max_tokens=1500,
             system='Tu es un analyste quantitatif expert. Réponds UNIQUEMENT en JSON valide.',
             messages=[{'role': 'user', 'content': prompt}],
