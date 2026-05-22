@@ -84,10 +84,16 @@ function cleanTextForSpeech(text: string): string {
     .replace(/^\s*\d+\.\s+/gm, '')
     // ── Remove URLs ─────────────────────────────────────────────────────────
     .replace(/https?:\/\/\S+/g, '')
-    // ── Strip repeated greeting ("Bonjour/Bonsoir/Bienvenue [Name]") ───────
-    // Keep the first greeting; strip duplicates by removing name-targeted greetings
-    // that appear mid-text (assistant often repeats the name unnecessarily in TTS)
-    .replace(/\b(Bonsoir|Bienvenue)\s+\w+[,!]?\s*/gi, '')
+    // ── Strip greeting openers (TTS last-resort filter) ─────────────────────
+    // These patterns are forbidden in the system prompt, but strip them from TTS
+    // anyway as a safety net — they sound terrible when spoken repeatedly.
+    // Patterns anchored to start-of-string (after trimming) AND mid-sentence.
+    .replace(/^(Bonjour|Bonsoir|Salut|Bienvenue|Hello|Coucou)[,!\s]+(\w+[,!\s]+)*/i, '')
+    .replace(/^Ravi(e)? de (vous|te) (retrouver|revoir|voir|parler)[,.\s]*/i, '')
+    .replace(/^J['']espère que (tu vas|vous allez) bien[,.\s]*/i, '')
+    .replace(/^Comment (vas-tu|allez-vous|ça va)[,?\s]*/i, '')
+    .replace(/^(Bien sûr|Absolument|Certainement|Avec plaisir|Bien entendu)[,!\s]*/i, '')
+    .replace(/^(Très bien|Parfait|Super|Excellent)[,!\s]*/i, '')
     // ── Financial symbol → spoken word ──────────────────────────────────────
     .replace(/(\d[\d\s,]*)\s*%/g,  '$1 pourcent')
     .replace(/\$\s*(\d)/g,          '$1 dollars')
