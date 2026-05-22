@@ -32,9 +32,9 @@ export class VoiceManager {
   private stream:              MediaStream | null = null;
   private chunks:              Blob[] = [];
   private silenceInterval:     ReturnType<typeof setInterval> | null = null;
-  private readonly SILENCE_MS  = 1500;   // stop recording after 1.5s of silence
-  private readonly MIN_REC_MS  = 400;    // minimum before silence detection engages
-  private readonly SILENCE_THR = 8;      // RMS threshold (0–255) for silence
+  private readonly SILENCE_MS  = 2500;   // stop recording after 2.5s of silence
+  private readonly MIN_REC_MS  = 800;    // minimum before silence detection engages
+  private readonly SILENCE_THR = 15;     // RMS threshold (0–255) — above=sound, below=silence
   private recordingStart       = 0;
 
   // ── TTS: SpeechSynthesis (unchanged) ─────────────────────────────────────
@@ -270,7 +270,7 @@ export class VoiceManager {
   // ── TTS: streaming feed — detects sentence boundaries ────────────────────
   speakStreaming(textDelta: string): void {
     // Strip chart tags — not speakable
-    const clean = textDelta.replace(/\[CHART:[A-Z0-9.\-]+\]/gi, '');
+    const clean = textDelta.replace(/\[CHART:[\^A-Z0-9._-]+\]/gi, '');
     this.streamBuffer += clean;
 
     // Extract complete sentences ending with . ! ?

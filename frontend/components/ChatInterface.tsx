@@ -76,7 +76,7 @@ function cleanTextForSpeech(text: string): string {
     // BMP symbol blocks: dingbats, misc symbols, enclosed alphanumerics, etc.
     .replace(/[⌀-➿⬀-⯿︀-﻿]/g, '')
     // ── Remove non-speech tags ─────────────────────────────────────────────
-    .replace(/\[CHART:[A-Z0-9.\-]+\]/gi, '')
+    .replace(/\[CHART:[\^A-Z0-9._-]+\]/gi, '')
     // ── Remove markdown ────────────────────────────────────────────────────
     .replace(/[*_~`#>|]/g, '')
     // ── Remove list markers ─────────────────────────────────────────────────
@@ -115,7 +115,7 @@ function cleanTextForSpeech(text: string): string {
 type Segment = { type: 'text'; text: string } | { type: 'chart'; symbol: string };
 
 function parseSegments(content: string): Segment[] {
-  const CHART_RE = /\[CHART:([A-Z0-9.\-]+)\]/gi;
+  const CHART_RE = /\[CHART:([\^A-Z0-9._-]+)\]/gi;
   const segments: Segment[] = [];
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -265,7 +265,7 @@ function ChartPlaceholder() {
 function getChartSymbols(content: string): string[] {
   // 1. Explicit [CHART:X] tags in raw content (Claude inserts these via system prompt)
   const explicit: string[] = [];
-  const CHART_RE = /\[CHART:([A-Z0-9.\-]+)\]/gi;
+  const CHART_RE = /\[CHART:([\^A-Z0-9._-]+)\]/gi;
   let m: RegExpExecArray | null;
   while ((m = CHART_RE.exec(content)) !== null) {
     const sym = m[1].toUpperCase();
@@ -317,7 +317,7 @@ function VoiceOverlay({
 
   // Only show last 180 chars of response in overlay preview
   const previewText = stripMarkdown(assistantText)
-    .replace(/\[CHART:[A-Z0-9.\-]+\]/gi, '')
+    .replace(/\[CHART:[\^A-Z0-9._-]+\]/gi, '')
     .slice(-180).trim();
 
   // TradingView symbol resolution for overlay ticker
