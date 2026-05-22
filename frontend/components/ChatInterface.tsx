@@ -34,7 +34,19 @@ const TOOL_LABELS: Record<string, string> = {
   web_search:                      '🔍 Recherche web',
 };
 
-// ── Markdown stripper ─────────────────────────────────────────────────────────
+// ── Known financial tickers for auto-detection ────────────────────────────────
+const KNOWN_TICKERS = new Set([
+  // Crypto
+  'BTC','ETH','SOL','BNB','ADA','XRP','DOGE','DOT','AVAX','MATIC',
+  'LINK','UNI','ATOM','LTC','SUI','APT','NEAR','TON','SHIB','TRX',
+  'PEPE','INJ','SEI','TIA','OP','ARB','FTM','SAND','MANA','AXS',
+  // Stocks
+  'AAPL','NVDA','TSLA','MSFT','GOOGL','GOOG','AMZN','META','NFLX',
+  'AMD','INTC','SPY','QQQ','COIN','MSTR','GME','AMC','PLTR','RIVN',
+  'NIO','BABA','TSM','ASML','SHOP','SQ','PYPL','UBER','LYFT','SNAP',
+]);
+
+// ── Markdown stripper (display only — does NOT remove [CHART:] tags) ──────────
 function stripMarkdown(text: string): string {
   return text
     .replace(/^#{1,6}\s+/gm, '')
@@ -51,8 +63,39 @@ function stripMarkdown(text: string): string {
       m.replace(/^```[^\n]*\n?/, '').replace(/\n?```$/, ''))
     .replace(/`([^`\n]+)`/g, '$1')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .replace(/\[CHART:[A-Z0-9.\-]+\]/gi, '')
     .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+// ── TTS text cleaner ──────────────────────────────────────────────────────────
+function cleanTextForSpeech(text: string): string {
+  return text
+    // Remove emojis via surrogate pairs (covers all Emoji Unicode planes, ES5-compatible)
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '')
+    // Remove common BMP symbols/dingbats
+    .replace(/[☀-➿⌀-⏿︀-﻿]/g, '')
+    // Remove [CHART:X] tags
+    .replace(/\[CHART:[A-Z0-9.\-]+\]/gi, '')
+    // Remove markdown symbols
+    .replace(/[*_~`#>|]/g, '')
+    // Remove bullet points
+    .replace(/^\s*[-•·▪▸]\s+/gm, '')
+    .replace(/^\s*\d+\.\s+/gm, '')
+    // Remove URLs
+    .replace(/https?:\/\/\S+/g, '')
+    // Financial symbol replacements
+    .replace(/(\d[\d\s]*)\s*%/g, '$1 pourcent')
+    .replace(/\$\s*(\d)/g, '$1 dollars')
+    .replace(/€\s*(\d)/g, '$1 euros')
+    .replace(/\+(\d)/g, 'plus $1')
+    // Abbreviation replacements
+    .replace(/\bvs\.?\b/gi, 'versus')
+    .replace(/\bex\.\s+/gi, 'par exemple ')
+    .replace(/\betc\.\s*/gi, 'et cetera ')
+    .replace(/\bCA\$/g, 'dollars canadiens')
+    // Clean whitespace
+    .replace(/\s{2,}/g, ' ')
     .trim();
 }
 
@@ -77,27 +120,29 @@ function parseSegments(content: string): Segment[] {
   return segments;
 }
 
+// ── BubbleText — renders message text without [CHART:] tags ──────────────────
 function BubbleText({ content }: { content: string }) {
-  const clean    = stripMarkdown(content);
-  const segments = parseSegments(clean);
+  // Parse segments from raw content, then display only text parts
+  const segments = parseSegments(content);
   const textOnly = segments
     .filter((s): s is { type: 'text'; text: string } => s.type === 'text')
-    .map((s) => s.text).join('');
+    .map((s) => stripMarkdown(s.text)).join('');
   return <span style={{ whiteSpace: 'pre-wrap' }}>{textOnly}</span>;
 }
 
+// ── Chart widget ──────────────────────────────────────────────────────────────
 function InlineChart({ symbol }: { symbol: string }) {
   const isCrypto = symbol.includes('-') ||
-    /^(BTC|ETH|SOL|BNB|ADA|XRP|DOGE|DOT|AVAX|MATIC|LINK|UNI|ATOM|LTC|SUI|APT|INJ|SEI|TIA|NEAR|TON|SHIB|TRX|PEPE)$/i.test(symbol);
+    /^(BTC|ETH|SOL|BNB|ADA|XRP|DOGE|DOT|AVAX|MATIC|LINK|UNI|ATOM|LTC|SUI|APT|INJ|SEI|TIA|NEAR|TON|SHIB|TRX|PEPE|OP|ARB|FTM|SAND|MANA|AXS)$/i.test(symbol);
   const tvSymbol = toTVSymbol(symbol, isCrypto ? 'crypto' : 'stock');
   return (
-    <div className="mt-3 rounded-xl border border-[#e5e7eb] bg-white shadow-sm">
+    <div className="mt-3 rounded-xl border border-[#e5e7eb] bg-white shadow-sm overflow-hidden">
       <div className="px-4 pt-3 pb-1 flex items-center justify-between border-b border-[#f3f4f6]">
         <span className="font-semibold text-sm text-[#1a1a1a]">{symbol}</span>
         <span className="text-[#9ca3af] text-xs">{tvSymbol}</span>
       </div>
-      <div style={{ height: 420, width: '100%' }}>
-        <TradingViewWidget tvSymbol={tvSymbol} height={420} />
+      <div style={{ height: 380, width: '100%' }}>
+        <TradingViewWidget tvSymbol={tvSymbol} height={380} />
       </div>
     </div>
   );
@@ -105,7 +150,7 @@ function InlineChart({ symbol }: { symbol: string }) {
 
 function ChartPlaceholder() {
   return (
-    <div className="mt-3 rounded-xl border border-[#e5e7eb] bg-[#f8f9fa] animate-pulse" style={{ height: 60 }}>
+    <div className="mt-3 rounded-xl border border-[#e5e7eb] bg-[#f8f9fa] animate-pulse" style={{ height: 56 }}>
       <div className="px-4 py-4 flex items-center gap-2 text-[#9ca3af] text-sm">
         <span>📊</span><span>Chargement du graphique…</span>
       </div>
@@ -113,57 +158,45 @@ function ChartPlaceholder() {
   );
 }
 
+// ── getChartSymbols: explicit tags first, then auto-detect ────────────────────
 function getChartSymbols(content: string): string[] {
-  return parseSegments(stripMarkdown(content))
-    .filter((s): s is { type: 'chart'; symbol: string } => s.type === 'chart')
-    .map((s) => s.symbol);
+  // 1. Explicit [CHART:X] tags in raw content (Claude inserts these via system prompt)
+  const explicit: string[] = [];
+  const CHART_RE = /\[CHART:([A-Z0-9.\-]+)\]/gi;
+  let m: RegExpExecArray | null;
+  while ((m = CHART_RE.exec(content)) !== null) {
+    const sym = m[1].toUpperCase();
+    if (!explicit.includes(sym)) explicit.push(sym);
+  }
+  if (explicit.length > 0) return explicit.slice(0, 3);
+
+  // 2. Auto-detect known tickers from plain text (fallback when Claude forgets)
+  const stripped = stripMarkdown(content);
+  const autoDetected: string[] = [];
+  const tickerRe = /\b([A-Z]{2,6}(?:-USD)?)\b/g;
+  while ((m = tickerRe.exec(stripped)) !== null) {
+    const sym = m[1];
+    if (KNOWN_TICKERS.has(sym) && !autoDetected.includes(sym)) {
+      autoDetected.push(sym);
+    }
+  }
+  return autoDetected.slice(0, 3);
 }
 
-// ── Sound wave bars (ChatGPT-style) ───────────────────────────────────────────
-const BAR_HEIGHTS = [28, 46, 64, 52, 36, 58, 30];
-const BAR_DELAYS  = [0, 110, 220, 155, 270, 85, 195];
+// ── Wave visualizer data (pre-computed sinusoidal heights) ────────────────────
+const WAVE_COUNT = 30;
+const WAVE_DATA = Array.from({ length: WAVE_COUNT }, (_, i) => ({
+  height: Math.round(8 + Math.abs(Math.sin(i * 0.38 + 0.6)) * 44 + Math.abs(Math.sin(i * 0.75 + 1.2)) * 16),
+  delay:  Math.round(i * 48 + Math.abs(Math.sin(i * 1.8)) * 70),
+}));
 
-function SoundBars({ active, fast }: { active: boolean; fast: boolean }) {
-  return (
-    <div className="flex items-end justify-center gap-1.5" style={{ height: 68 }}>
-      {BAR_HEIGHTS.map((h, i) => (
-        <div
-          key={i}
-          style={{
-            width: 4,
-            height: h,
-            borderRadius: 4,
-            backgroundColor: 'rgba(255,255,255,0.88)',
-            transformOrigin: 'bottom',
-            transform: active ? undefined : 'scaleY(0.12)',
-            animationName: active ? 'voiceBar' : 'none',
-            animationDuration: fast ? '0.45s' : '0.85s',
-            animationTimingFunction: 'ease-in-out',
-            animationIterationCount: 'infinite',
-            animationDelay: `${BAR_DELAYS[i]}ms`,
-            transition: active ? 'none' : 'transform 0.4s ease',
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
-// ── Voice overlay (full-screen, ChatGPT-style) ────────────────────────────────
+// ── Premium Voice Overlay ─────────────────────────────────────────────────────
 function VoiceOverlay({
-  isOpen,
-  voiceState,
-  interimTranscript,
-  assistantText,
-  onToggleMic,
-  onClose,
+  isOpen, voiceState, interimTranscript, assistantText, onToggleMic, onClose,
 }: {
-  isOpen:             boolean;
-  voiceState:         VoiceState;
-  interimTranscript:  string;
-  assistantText:      string;
-  onToggleMic:        () => void;
-  onClose:            () => void;
+  isOpen: boolean; voiceState: VoiceState;
+  interimTranscript: string; assistantText: string;
+  onToggleMic: () => void; onClose: () => void;
 }) {
   if (!isOpen) return null;
 
@@ -172,130 +205,251 @@ function VoiceOverlay({
   const speaking   = voiceState === 'speaking';
 
   const statusText =
-    listening  ? 'Je vous écoute…'        :
-    processing ? 'Réflexion en cours…'    :
-    speaking   ? 'Je vous réponds…'       :
-                 'Appuyez sur le micro pour parler';
+    listening  ? 'Je vous écoute…'     :
+    processing ? 'Réflexion…'          :
+    speaking   ? 'Je vous réponds…'    :
+                 'Parlez pour commencer';
 
-  const displayText = stripMarkdown(assistantText).slice(-220);
+  // Only show last 180 chars of response in overlay preview
+  const previewText = stripMarkdown(assistantText)
+    .replace(/\[CHART:[A-Z0-9.\-]+\]/gi, '')
+    .slice(-180).trim();
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center select-none"
-      style={{ background: 'rgba(4, 4, 16, 0.97)', backdropFilter: 'blur(16px)' }}
+      className="fixed inset-0 z-50 flex flex-col select-none overflow-hidden"
+      style={{
+        background: 'radial-gradient(ellipse 130% 80% at 50% -5%, #1e1250 0%, #0b0525 45%, #020110 100%)',
+      }}
     >
-      {/* Keyframes injected locally */}
+      {/* ── CSS keyframes ── */}
       <style dangerouslySetInnerHTML={{ __html: `
         @keyframes voiceBar {
-          0%, 100% { transform: scaleY(0.12); }
-          50%       { transform: scaleY(1);    }
+          0%, 100% { transform: scaleY(0.12); opacity: 0.4; }
+          50%       { transform: scaleY(1);    opacity: 1;   }
         }
-        @keyframes orbListen {
+        @keyframes orbListenGlow {
           0%, 100% {
-            box-shadow: 0 0 0 0 rgba(129,140,248,0.55), 0 0 50px 12px rgba(99,102,241,0.25);
+            box-shadow: 0 0 0 0 rgba(99,102,241,0.6),
+                        0 0 60px 15px rgba(99,102,241,0.2),
+                        0 0 120px 40px rgba(139,92,246,0.1);
             transform: scale(1);
           }
           50% {
-            box-shadow: 0 0 0 22px rgba(129,140,248,0), 0 0 80px 24px rgba(99,102,241,0.45);
+            box-shadow: 0 0 0 28px rgba(99,102,241,0),
+                        0 0 90px 30px rgba(99,102,241,0.4),
+                        0 0 180px 60px rgba(139,92,246,0.2);
+            transform: scale(1.055);
+          }
+        }
+        @keyframes orbSpeakGlow {
+          0%, 100% {
+            box-shadow: 0 0 0 0 rgba(16,185,129,0.65),
+                        0 0 60px 15px rgba(16,185,129,0.2);
+            transform: scale(1);
+          }
+          50% {
+            box-shadow: 0 0 0 24px rgba(16,185,129,0),
+                        0 0 90px 30px rgba(16,185,129,0.4);
             transform: scale(1.07);
           }
         }
-        @keyframes orbThink {
-          0%   { transform: rotate(0deg)   scale(0.96); opacity: 0.75; }
-          50%  { transform: rotate(180deg) scale(1.04); opacity: 1;    }
-          100% { transform: rotate(360deg) scale(0.96); opacity: 0.75; }
+        @keyframes orbThinkPulse {
+          0%, 100% { opacity: 0.7; transform: scale(0.98); filter: hue-rotate(0deg); }
+          50%       { opacity: 1;   transform: scale(1.02); filter: hue-rotate(25deg); }
         }
-        @keyframes orbSpeak {
-          0%, 100% {
-            box-shadow: 0 0 0 0 rgba(52,211,153,0.55), 0 0 50px 12px rgba(16,185,129,0.25);
-            transform: scale(1);
-          }
-          50% {
-            box-shadow: 0 0 0 18px rgba(52,211,153,0), 0 0 80px 24px rgba(16,185,129,0.45);
-            transform: scale(1.09);
-          }
+        @keyframes ringExpand {
+          0%   { transform: scale(1);   opacity: 0.45; }
+          100% { transform: scale(1.55); opacity: 0; }
         }
-        .orb-listen { animation: orbListen 1.7s ease-in-out infinite; }
-        .orb-think  { animation: orbThink  2.2s linear    infinite; }
-        .orb-speak  { animation: orbSpeak  0.65s ease-in-out infinite; }
+        @keyframes ringExpand2 {
+          0%   { transform: scale(1);   opacity: 0.25; }
+          100% { transform: scale(1.8); opacity: 0; }
+        }
+        .orb-listen { animation: orbListenGlow 2s ease-in-out infinite; }
+        .orb-speak  { animation: orbSpeakGlow  0.7s ease-in-out infinite; }
+        .orb-think  { animation: orbThinkPulse 2.4s ease-in-out infinite; }
+        .ring-1 { animation: ringExpand  2s ease-out infinite; }
+        .ring-2 { animation: ringExpand2 2s ease-out infinite 0.7s; }
+        .speak-ring-1 { animation: ringExpand  0.9s ease-out infinite; }
+        .speak-ring-2 { animation: ringExpand2 0.9s ease-out infinite 0.35s; }
       `}} />
 
-      {/* ── Close ── */}
-      <button
-        onClick={onClose}
-        aria-label="Quitter le mode vocal"
-        className="absolute top-6 right-6 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/60 hover:text-white transition-all text-xl font-light"
-      >
-        ✕
-      </button>
-
-      {/* ── Orb ── */}
-      <div
-        className={`w-36 h-36 rounded-full flex items-center justify-center ${
-          listening  ? 'bg-gradient-to-br from-indigo-500 to-violet-700 orb-listen' :
-          processing ? 'bg-gradient-to-br from-slate-500  to-indigo-600 orb-think'  :
-          speaking   ? 'bg-gradient-to-br from-emerald-400 to-teal-600  orb-speak'  :
-                       'bg-gradient-to-br from-indigo-400  to-violet-600'
-        }`}
-      >
-        <SoundBars active={listening || speaking} fast={speaking} />
+      {/* ── Header ── */}
+      <div className="flex items-center justify-between px-6 pt-6 pb-0 flex-shrink-0">
+        <span className="text-white/25 text-xs font-semibold tracking-[0.25em] uppercase">
+          FinanceAI
+        </span>
+        <button
+          onClick={onClose}
+          aria-label="Quitter le mode vocal"
+          className="w-9 h-9 rounded-full bg-white/8 hover:bg-white/15 flex items-center justify-center text-white/50 hover:text-white transition-all"
+          style={{ background: 'rgba(255,255,255,0.07)' }}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-4 h-4">
+            <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round"/>
+          </svg>
+        </button>
       </div>
 
-      {/* ── Status ── */}
-      <p className="mt-9 text-white text-lg font-medium tracking-wide">
-        {statusText}
-      </p>
+      {/* ── Center content ── */}
+      <div className="flex-1 flex flex-col items-center justify-center gap-7 px-8 min-h-0">
 
-      {/* ── Interim transcript ── */}
-      {interimTranscript && (
-        <p
-          aria-live="polite"
-          className="mt-3 text-white/55 text-base italic px-10 text-center max-w-sm leading-snug"
-        >
-          &ldquo;{interimTranscript}&rdquo;
-        </p>
-      )}
+        {/* Orb with ripple rings */}
+        <div className="relative flex items-center justify-center" style={{ width: 220, height: 220 }}>
 
-      {/* ── Last agent response (streaming preview) ── */}
-      {(speaking || processing) && displayText && (
-        <p className="mt-4 text-white/40 text-sm px-12 text-center max-w-md leading-relaxed line-clamp-3">
-          {displayText}
-        </p>
-      )}
+          {/* Ripple rings — listening */}
+          {listening && (
+            <>
+              <div className="ring-1 absolute inset-0 rounded-full border border-indigo-400/60" />
+              <div className="ring-2 absolute inset-0 rounded-full border border-violet-400/40" />
+            </>
+          )}
+          {/* Ripple rings — speaking */}
+          {speaking && (
+            <>
+              <div className="speak-ring-1 absolute inset-0 rounded-full border border-emerald-400/60" />
+              <div className="speak-ring-2 absolute inset-0 rounded-full border border-teal-400/40" />
+            </>
+          )}
 
-      {/* ── Controls ── */}
-      <div className="mt-14 flex flex-col items-center gap-4">
+          {/* Main orb */}
+          <div
+            className={`w-44 h-44 rounded-full flex items-center justify-center relative ${
+              listening  ? 'orb-listen' :
+              processing ? 'orb-think'  :
+              speaking   ? 'orb-speak'  : ''
+            }`}
+            style={{
+              background: listening
+                ? 'radial-gradient(circle at 38% 32%, #818cf8, #6366f1 40%, #7c3aed 75%, #4c1d95)'
+                : processing
+                ? 'radial-gradient(circle at 38% 32%, #94a3b8, #6366f1 50%, #4338ca)'
+                : speaking
+                ? 'radial-gradient(circle at 38% 32%, #6ee7b7, #10b981 45%, #0891b2 80%, #0e7490)'
+                : 'radial-gradient(circle at 38% 32%, #a5b4fc, #6366f1 50%, #5b21b6)',
+            }}
+          >
+            {/* Inner shine */}
+            <div
+              className="absolute rounded-full"
+              style={{
+                top: '14%', left: '18%', width: '36%', height: '28%',
+                background: 'rgba(255,255,255,0.18)',
+                filter: 'blur(6px)',
+              }}
+            />
+            {/* Icon inside orb */}
+            <div className="relative z-10 opacity-50">
+              {processing ? (
+                <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5" className="w-8 h-8 animate-spin" style={{ animationDuration: '3s' }}>
+                  <path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6 2.1 2.1M5.6 18.4l2.1-2.1m8.6-8.6 2.1-2.1" strokeLinecap="round"/>
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" fill="white" className="w-8 h-8">
+                  <path d="M12 1a4 4 0 0 1 4 4v6a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4z"/>
+                  <path d="M19 10a1 1 0 0 0-2 0 5 5 0 0 1-10 0 1 1 0 0 0-2 0 7 7 0 0 0 6 6.92V19H9a1 1 0 0 0 0 2h6a1 1 0 0 0 0-2h-2v-2.08A7 7 0 0 0 19 10z"/>
+                </svg>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Status text */}
+        <div className="text-center space-y-2">
+          <p className="text-white text-xl font-medium tracking-wide">{statusText}</p>
+          {interimTranscript && (
+            <p
+              aria-live="polite"
+              className="text-white/55 text-base italic leading-snug max-w-xs"
+            >
+              &ldquo;{interimTranscript}&rdquo;
+            </p>
+          )}
+        </div>
+
+        {/* Agent response preview (speaking/processing) */}
+        {(speaking || processing) && previewText && (
+          <p className="text-white/32 text-sm text-center max-w-sm leading-relaxed px-4"
+            style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+            {previewText}
+          </p>
+        )}
+      </div>
+
+      {/* ── Wave visualizer ── */}
+      <div
+        className="flex-shrink-0 flex items-end justify-center gap-0.5 px-6"
+        style={{ height: 72 }}
+      >
+        {WAVE_DATA.map(({ height, delay }, i) => (
+          <div
+            key={i}
+            style={{
+              flex: 1,
+              maxWidth: 6,
+              height,
+              borderRadius: 3,
+              backgroundColor: speaking
+                ? 'rgba(52,211,153,0.75)'
+                : listening
+                ? 'rgba(129,140,248,0.75)'
+                : 'rgba(255,255,255,0.2)',
+              transformOrigin: 'bottom',
+              transform: (listening || speaking) ? undefined : 'scaleY(0.12)',
+              animationName: (listening || speaking) ? 'voiceBar' : 'none',
+              animationDuration: speaking ? '0.5s' : '0.9s',
+              animationTimingFunction: 'ease-in-out',
+              animationIterationCount: 'infinite',
+              animationDelay: `${delay}ms`,
+              transition: (listening || speaking) ? 'none' : 'transform 0.5s ease, background-color 0.4s ease',
+            }}
+          />
+        ))}
+      </div>
+
+      {/* ── Control button ── */}
+      <div className="flex-shrink-0 flex flex-col items-center gap-3 py-8">
         <button
           onClick={onToggleMic}
-          aria-label={listening ? "Arrêter l'écoute" : speaking ? "Interrompre l'agent" : "Parler"}
-          className={`w-16 h-16 rounded-full flex items-center justify-center text-2xl transition-all shadow-xl ${
+          aria-label={listening ? "Arrêter l'écoute" : speaking ? "Interrompre" : "Parler"}
+          className={`w-16 h-16 rounded-full flex items-center justify-center transition-all shadow-2xl ${
             listening
-              ? 'bg-red-500 hover:bg-red-600 shadow-red-500/40'
+              ? 'bg-red-500 hover:bg-red-600 shadow-red-500/50'
               : speaking
-              ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/40'
-              : 'bg-white/15 hover:bg-white/25'
+              ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/50'
+              : 'shadow-black/40'
           }`}
+          style={!listening && !speaking ? { background: 'rgba(255,255,255,0.12)' } : {}}
         >
-          {listening ? '⏹' : speaking ? '⏸' : '🎤'}
+          {listening ? (
+            <svg viewBox="0 0 24 24" fill="white" className="w-6 h-6">
+              <rect x="6" y="6" width="12" height="12" rx="1"/>
+            </svg>
+          ) : speaking ? (
+            <svg viewBox="0 0 24 24" fill="white" className="w-6 h-6">
+              <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+            </svg>
+          ) : (
+            <svg viewBox="0 0 24 24" fill="white" className="w-6 h-6">
+              <path d="M12 1a4 4 0 0 1 4 4v6a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4z"/>
+              <path d="M19 10a1 1 0 0 0-2 0 5 5 0 0 1-10 0 1 1 0 0 0-2 0 7 7 0 0 0 6 6.92V19H9a1 1 0 0 0 0 2h6a1 1 0 0 0 0-2h-2v-2.08A7 7 0 0 0 19 10z"/>
+            </svg>
+          )}
         </button>
-
         <p className="text-white/22 text-xs tracking-wide">
-          {listening
-            ? 'Silence détecté → envoi automatique'
-            : speaking
-            ? 'Appuyez pour interrompre'
-            : 'La conversation continue automatiquement'}
+          {listening ? 'Silence détecté → envoi auto' : speaking ? 'Appuyez pour interrompre' : 'Conversation continue automatiquement'}
         </p>
       </div>
     </div>
   );
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
+// ── Main ChatInterface component ──────────────────────────────────────────────
 export default function ChatInterface() {
   const { t } = useLanguage();
 
-  // ── Chat state ───────────────────────────────────────────────────────────────
+  // ── Chat state ──────────────────────────────────────────────────────────────
   const [messages, setMessages]           = useState<Message[]>([]);
   const [input, setInput]                 = useState('');
   const [isLoading, setIsLoading]         = useState(false);
@@ -304,7 +458,7 @@ export default function ChatInterface() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef    = useRef<HTMLTextAreaElement>(null);
 
-  // ── Voice state ──────────────────────────────────────────────────────────────
+  // ── Voice state ─────────────────────────────────────────────────────────────
   const [voiceOverlayOpen, setVoiceOverlayOpen]   = useState(false);
   const [isListening, setIsListening]             = useState(false);
   const [isSpeaking, setIsSpeaking]               = useState(false);
@@ -313,18 +467,19 @@ export default function ChatInterface() {
   const voiceManagerRef     = useRef<VoiceManager | null>(null);
   const voiceOverlayOpenRef = useRef(false);
   const sendMessageRef      = useRef<(text: string) => Promise<void>>(async () => {});
+  const sentencesSpokenRef  = useRef(0);
+  const MAX_SPOKEN_SENTENCES = 3;
 
-  // Derived
+  // ── Derived state ───────────────────────────────────────────────────────────
   const voiceState: VoiceState =
-    isLoading  ? 'processing' :
-    isSpeaking ? 'speaking'   :
-    isListening? 'listening'  :
-                 'idle';
+    isLoading   ? 'processing' :
+    isSpeaking  ? 'speaking'   :
+    isListening ? 'listening'  : 'idle';
 
   const lastAssistantMsg =
     [...messages].reverse().find((m) => m.role === 'assistant')?.content ?? '';
 
-  // ── Scroll ───────────────────────────────────────────────────────────────────
+  // ── Effects ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -369,7 +524,6 @@ export default function ChatInterface() {
       } catch { /* use default */ }
 
       const vm = new VoiceManager(lang);
-
       vm.onTranscript = (text, isFinal) => {
         setInterimTranscript(isFinal ? '' : text);
         if (isFinal && text.trim()) {
@@ -384,7 +538,6 @@ export default function ChatInterface() {
         setVoiceError(err);
         setTimeout(() => setVoiceError(''), 6000);
       };
-
       voiceManagerRef.current = vm;
     };
 
@@ -392,7 +545,7 @@ export default function ChatInterface() {
     return () => { voiceManagerRef.current?.dispose(); };
   }, []);
 
-  // ── Auto-restart listening when overlay is open and idle ─────────────────────
+  // ── Auto-restart listening when overlay open and idle ─────────────────────────
   useEffect(() => {
     if (!voiceOverlayOpen || isLoading || isSpeaking || isListening) return;
     const timer = setTimeout(() => {
@@ -403,7 +556,7 @@ export default function ChatInterface() {
     return () => clearTimeout(timer);
   }, [voiceOverlayOpen, isLoading, isSpeaking, isListening]);
 
-  // ── Core streaming ────────────────────────────────────────────────────────────
+  // ── Core streaming ───────────────────────────────────────────────────────────
   const streamResponse = async (
     response: Response,
     onDelta?: (text: string) => void
@@ -442,18 +595,19 @@ export default function ChatInterface() {
             const label = TOOL_LABELS[parsed.name] ?? parsed.name;
             setActiveTools((prev) => prev.filter((l) => l !== label));
           }
-        } catch { /* ignore */ }
+        } catch { /* ignore partial JSON */ }
       }
     }
   };
 
-  // ── sendMessage ───────────────────────────────────────────────────────────────
+  // ── sendMessage ──────────────────────────────────────────────────────────────
   const sendMessage = useCallback(async (text: string) => {
     if (!text.trim() || isLoading) return;
 
     setMessages((prev) => [...prev, { role: 'user', content: text }]);
     setIsLoading(true);
     setActiveTools([]);
+    sentencesSpokenRef.current = 0; // reset sentence counter for new message
 
     try {
       const response = await fetch('/api/chat', {
@@ -463,13 +617,25 @@ export default function ChatInterface() {
       });
       if (!response.ok || !response.body) throw new Error('Erreur serveur');
 
-      // In overlay mode, always speak. Outside overlay, no TTS.
       const shouldSpeak = voiceOverlayOpenRef.current && !!voiceManagerRef.current;
-      await streamResponse(
-        response,
-        shouldSpeak ? (delta) => voiceManagerRef.current?.speakStreaming(delta) : undefined
-      );
-      if (shouldSpeak) voiceManagerRef.current?.flushStreamBuffer();
+
+      const onDelta = shouldSpeak
+        ? (delta: string) => {
+            // Stop speaking after MAX_SPOKEN_SENTENCES sentences
+            if (sentencesSpokenRef.current >= MAX_SPOKEN_SENTENCES) return;
+            const cleaned = cleanTextForSpeech(delta);
+            if (cleaned.trim()) {
+              voiceManagerRef.current?.speakStreaming(cleaned);
+              // Count sentence-ending punctuation to track progress
+              sentencesSpokenRef.current += (cleaned.match(/[.!?]+/g) || []).length;
+            }
+          }
+        : undefined;
+
+      await streamResponse(response, onDelta);
+      if (shouldSpeak && sentencesSpokenRef.current < MAX_SPOKEN_SENTENCES) {
+        voiceManagerRef.current?.flushStreamBuffer();
+      }
 
     } catch {
       setMessages((prev) => [
@@ -483,10 +649,10 @@ export default function ChatInterface() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading]);
 
-  // Keep ref fresh so VoiceManager callbacks always call latest sendMessage
+  // Keep sendMessageRef fresh so voice callbacks always call the latest version
   useEffect(() => { sendMessageRef.current = sendMessage; });
 
-  // ── Onboarding ────────────────────────────────────────────────────────────────
+  // ── Onboarding ───────────────────────────────────────────────────────────────
   const triggerOnboarding = async () => {
     setIsLoading(true);
     try {
@@ -517,7 +683,6 @@ export default function ChatInterface() {
 
   // ── Voice overlay controls ────────────────────────────────────────────────────
   const openVoiceOverlay = () => {
-    // Vérification au clic (pas au render) — bouton toujours visible
     if (!isVoiceSupported()) {
       setVoiceError('Le mode vocal nécessite Chrome ou Edge — votre navigateur ne supporte pas cette fonctionnalité.');
       setTimeout(() => setVoiceError(''), 5000);
@@ -525,10 +690,7 @@ export default function ChatInterface() {
     }
     voiceOverlayOpenRef.current = true;
     setVoiceOverlayOpen(true);
-    // Si VoiceManager pas encore prêt (race condition au premier clic), on attend
-    if (voiceManagerRef.current) {
-      voiceManagerRef.current.startListening();
-    }
+    voiceManagerRef.current?.startListening();
   };
 
   const closeVoiceOverlay = () => {
@@ -542,14 +704,9 @@ export default function ChatInterface() {
   const toggleOverlayMic = () => {
     const vm = voiceManagerRef.current;
     if (!vm) return;
-    if (isListening) {
-      vm.stopListening();
-    } else if (isSpeaking) {
-      vm.stopSpeaking();
-      // Auto-restart will fire via useEffect after 500ms
-    } else {
-      vm.startListening();
-    }
+    if (isListening)     { vm.stopListening(); }
+    else if (isSpeaking) { vm.stopSpeaking(); }
+    else                 { vm.startListening(); }
   };
 
   // ── Loading skeleton ──────────────────────────────────────────────────────────
@@ -565,10 +722,11 @@ export default function ChatInterface() {
     );
   }
 
+  // ── Render ────────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-full">
 
-      {/* ── Voice overlay (portal-style, fixed position) ─────────────────────── */}
+      {/* Voice overlay — fixed, full screen */}
       <VoiceOverlay
         isOpen={voiceOverlayOpen}
         voiceState={voiceState}
@@ -578,14 +736,17 @@ export default function ChatInterface() {
         onClose={closeVoiceOverlay}
       />
 
-      {/* ── Messages ──────────────────────────────────────────────────────────── */}
+      {/* ── Messages ────────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
         {messages.map((message, index) => {
           const isLastAndStreaming = isLoading && index === messages.length - 1;
-          const chartSymbols = message.role === 'assistant' ? getChartSymbols(message.content) : [];
+          const chartSymbols = message.role === 'assistant' && !isLastAndStreaming
+            ? getChartSymbols(message.content)
+            : [];
 
           return (
             <div key={index}>
+              {/* Bubble row */}
               <div className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 {message.role === 'assistant' && (
                   <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mr-2 mt-1">
@@ -618,12 +779,22 @@ export default function ChatInterface() {
                 )}
               </div>
 
-              {message.role === 'assistant' && chartSymbols.length > 0 && (
-                <div className="ml-10 space-y-3">
-                  {isLastAndStreaming
-                    ? chartSymbols.map((_, i) => <ChartPlaceholder key={i} />)
-                    : chartSymbols.map((sym) => <InlineChart key={sym} symbol={sym} />)
-                  }
+              {/* Charts — below bubble, only after streaming completes */}
+              {chartSymbols.length > 0 && (
+                <div className="ml-10 space-y-3 mt-1">
+                  {chartSymbols.map((sym) => (
+                    <InlineChart key={sym} symbol={sym} />
+                  ))}
+                </div>
+              )}
+
+              {/* Chart placeholder during streaming */}
+              {isLastAndStreaming && message.role === 'assistant' && (
+                <div className="ml-10">
+                  {/* placeholder shown only if we detect chart tags mid-stream */}
+                  {getChartSymbols(message.content).map((_, i) => (
+                    <ChartPlaceholder key={i} />
+                  ))}
                 </div>
               )}
             </div>
@@ -632,7 +803,7 @@ export default function ChatInterface() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* ── Tool badges ───────────────────────────────────────────────────────── */}
+      {/* ── Tool badges ────────────────────────────────────────────────────── */}
       {activeTools.length > 0 && (
         <div className="flex-shrink-0 px-4 py-2 flex flex-wrap gap-2">
           {activeTools.map((label) => (
@@ -646,14 +817,14 @@ export default function ChatInterface() {
         </div>
       )}
 
-      {/* ── Voice error banner ────────────────────────────────────────────────── */}
+      {/* ── Voice error banner ──────────────────────────────────────────────── */}
       {voiceError && (
         <div className="flex-shrink-0 mx-4 mb-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-xs" role="alert">
           {voiceError}
         </div>
       )}
 
-      {/* ── Input ─────────────────────────────────────────────────────────────── */}
+      {/* ── Input area ──────────────────────────────────────────────────────── */}
       <div className="flex-shrink-0 border-t border-[#e5e7eb] p-4 bg-white">
         <form onSubmit={handleSubmit} className="flex gap-2">
           <textarea
@@ -667,30 +838,25 @@ export default function ChatInterface() {
             disabled={isLoading}
           />
 
-          {/* Mic button — toujours visible, gère le cas non supporté au clic */}
+          {/* Mic button — always visible */}
           <button
-              type="button"
-              onClick={openVoiceOverlay}
-              aria-label="Activer le mode vocal"
-              className={`relative flex-shrink-0 w-11 h-11 rounded-xl flex items-center justify-center transition-all ${
-                voiceOverlayOpen
-                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/40'
-                  : 'bg-[#f3f4f6] hover:bg-indigo-50 text-[#6b7280] hover:text-indigo-600'
-              }`}
-            >
-              {voiceOverlayOpen && (
-                <span className="absolute inset-0 rounded-xl bg-indigo-500 animate-ping opacity-30" />
-              )}
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                className="relative w-5 h-5"
-              >
-                <path d="M12 1a4 4 0 0 1 4 4v6a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4z" />
-                <path d="M19 10a1 1 0 0 0-2 0 5 5 0 0 1-10 0 1 1 0 0 0-2 0 7 7 0 0 0 6 6.92V19H9a1 1 0 0 0 0 2h6a1 1 0 0 0 0-2h-2v-2.08A7 7 0 0 0 19 10z" />
-              </svg>
-            </button>
+            type="button"
+            onClick={openVoiceOverlay}
+            aria-label="Activer le mode vocal"
+            className={`relative flex-shrink-0 w-11 h-11 rounded-xl flex items-center justify-center transition-all ${
+              voiceOverlayOpen
+                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/40'
+                : 'bg-[#f3f4f6] hover:bg-indigo-50 text-[#6b7280] hover:text-indigo-600'
+            }`}
+          >
+            {voiceOverlayOpen && (
+              <span className="absolute inset-0 rounded-xl bg-indigo-500 animate-ping opacity-25" />
+            )}
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="relative w-5 h-5">
+              <path d="M12 1a4 4 0 0 1 4 4v6a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4z" />
+              <path d="M19 10a1 1 0 0 0-2 0 5 5 0 0 1-10 0 1 1 0 0 0-2 0 7 7 0 0 0 6 6.92V19H9a1 1 0 0 0 0 2h6a1 1 0 0 0 0-2h-2v-2.08A7 7 0 0 0 19 10z" />
+            </svg>
+          </button>
 
           <button
             type="submit"
