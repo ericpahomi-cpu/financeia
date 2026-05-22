@@ -519,14 +519,18 @@ export default function ChatInterface() {
 
   // ── Voice overlay controls ────────────────────────────────────────────────────
   const openVoiceOverlay = () => {
-    if (!voiceSupported) {
-      setVoiceError('Le mode vocal nécessite Chrome ou Edge.');
-      setTimeout(() => setVoiceError(''), 4000);
+    // Vérification au clic (pas au render) — bouton toujours visible
+    if (!isVoiceSupported()) {
+      setVoiceError('Le mode vocal nécessite Chrome ou Edge — votre navigateur ne supporte pas cette fonctionnalité.');
+      setTimeout(() => setVoiceError(''), 5000);
       return;
     }
     voiceOverlayOpenRef.current = true;
     setVoiceOverlayOpen(true);
-    voiceManagerRef.current?.startListening();
+    // Si VoiceManager pas encore prêt (race condition au premier clic), on attend
+    if (voiceManagerRef.current) {
+      voiceManagerRef.current.startListening();
+    }
   };
 
   const closeVoiceOverlay = () => {
@@ -665,9 +669,8 @@ export default function ChatInterface() {
             disabled={isLoading}
           />
 
-          {/* Mic button — always visible when voice supported */}
-          {voiceSupported && (
-            <button
+          {/* Mic button — toujours visible, gère le cas non supporté au clic */}
+          <button
               type="button"
               onClick={openVoiceOverlay}
               aria-label="Activer le mode vocal"
@@ -690,7 +693,6 @@ export default function ChatInterface() {
                 <path d="M19 10a1 1 0 0 0-2 0 5 5 0 0 1-10 0 1 1 0 0 0-2 0 7 7 0 0 0 6 6.92V19H9a1 1 0 0 0 0 2h6a1 1 0 0 0 0-2h-2v-2.08A7 7 0 0 0 19 10z" />
               </svg>
             </button>
-          )}
 
           <button
             type="submit"
