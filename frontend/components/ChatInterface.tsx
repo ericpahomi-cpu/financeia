@@ -594,6 +594,7 @@ export default function ChatInterface() {
   const [activeTools, setActiveTools]     = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef    = useRef<HTMLTextAreaElement>(null);
+  const messagesRef    = useRef<Message[]>([]); // always-current snapshot for callbacks
 
   // ── Voice state ─────────────────────────────────────────────────────────────
   const [voiceOverlayOpen, setVoiceOverlayOpen]   = useState(false);
@@ -623,6 +624,9 @@ export default function ChatInterface() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Keep messagesRef current so sendMessage can read messages without stale closure
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
 
   // ── Load history ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -757,6 +761,15 @@ export default function ChatInterface() {
   const sendMessage = useCallback(async (text: string) => {
     if (!text.trim() || isLoading) return;
 
+    // ── Inject visible chart context into the API message (not the displayed text) ─
+    // Find the last completed assistant message that references a chart symbol.
+    const lastAssistant = [...messagesRef.current].reverse().find((m) => m.role === 'assistant');
+    const visibleSymbols = lastAssistant ? getChartSymbols(lastAssistant.content) : [];
+    const apiText = visibleSymbols.length > 0
+      ? `${text} [CHART:${visibleSymbols[0]} actuellement affiché]`
+      : text;
+
+    // Display the original user text in the UI (no bracket noise)
     setMessages((prev) => [...prev, { role: 'user', content: text }]);
     setIsLoading(true);
     setActiveTools([]);
@@ -766,7 +779,7 @@ export default function ChatInterface() {
       const response = await fetch('/api/chat', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ message: text }),
+        body:    JSON.stringify({ message: apiText }),
       });
       if (!response.ok || !response.body) throw new Error('Erreur serveur');
 
