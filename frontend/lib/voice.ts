@@ -20,8 +20,10 @@ export function isVoiceSupported(): boolean {
 
 // ── VoiceManager ──────────────────────────────────────────────────────────────
 export class VoiceManager {
-  private recognition: SpeechRecognition | null = null;
-  private synthesis:   SpeechSynthesis;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private recognition: any = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private synthesis:   any;
   private currentLanguage: VoiceLanguage;
 
   // Listening state
@@ -58,13 +60,14 @@ export class VoiceManager {
     const API = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
     if (!API) return;
 
-    this.recognition               = new API() as SpeechRecognition;
+    this.recognition               = new API();
     this.recognition.continuous    = true;
     this.recognition.interimResults = true;
     this.recognition.lang          = SPEECH_LANG_CODES[this.currentLanguage];
     this.recognition.maxAlternatives = 1;
 
-    this.recognition.onresult = (event: SpeechRecognitionEvent) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.recognition.onresult = (event: any) => {
       // Barge-in: user speaks while agent is talking → interrupt agent
       if (this._isSpeaking) {
         this.stopSpeaking();
@@ -84,7 +87,8 @@ export class VoiceManager {
       }
     };
 
-    this.recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.recognition.onerror = (event: any) => {
       this._isListening = false;
       this.onListeningChange?.(false);
 
@@ -233,13 +237,16 @@ export class VoiceManager {
     });
   }
 
-  private getBestVoice(): SpeechSynthesisVoice | null {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private getBestVoice(): any | null {
     const voices    = this.synthesis.getVoices();
     const langCode  = SPEECH_LANG_CODES[this.currentLanguage];
     const langPrefix = this.currentLanguage;
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const matching = voices.filter(
-      (v) => v.lang === langCode || v.lang.startsWith(langPrefix)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (v: any) => v.lang === langCode || v.lang.startsWith(langPrefix)
     );
     if (matching.length === 0) return null;
 
@@ -250,13 +257,15 @@ export class VoiceManager {
       'milena', 'irina',                          // ru
       'ioana',                                    // ro
     ];
-    const quality = matching.find((v) =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const quality = matching.find((v: any) =>
       preferredNames.some((k) => v.name.toLowerCase().includes(k))
     );
     if (quality) return quality;
 
     // Prefer local (device-installed) voices
-    const local = matching.find((v) => v.localService);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const local = matching.find((v: any) => v.localService);
     if (local) return local;
 
     return matching[0];

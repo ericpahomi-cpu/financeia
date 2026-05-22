@@ -305,7 +305,6 @@ export default function ChatInterface() {
   const textareaRef    = useRef<HTMLTextAreaElement>(null);
 
   // ── Voice state ──────────────────────────────────────────────────────────────
-  const [voiceSupported, setVoiceSupported]       = useState(false);
   const [voiceOverlayOpen, setVoiceOverlayOpen]   = useState(false);
   const [isListening, setIsListening]             = useState(false);
   const [isSpeaking, setIsSpeaking]               = useState(false);
@@ -356,7 +355,6 @@ export default function ChatInterface() {
   // ── VoiceManager init ────────────────────────────────────────────────────────
   useEffect(() => {
     if (!isVoiceSupported()) return;
-    setVoiceSupported(true);
 
     const initVoice = async () => {
       let lang: VoiceLanguage = 'fr';
