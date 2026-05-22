@@ -70,31 +70,37 @@ function stripMarkdown(text: string): string {
 // ── TTS text cleaner ──────────────────────────────────────────────────────────
 function cleanTextForSpeech(text: string): string {
   return text
-    // Remove emojis via surrogate pairs (covers all Emoji Unicode planes, ES5-compatible)
-    // eslint-disable-next-line no-control-regex
+    // ── Emojis & symbols ───────────────────────────────────────────────────
+    // Surrogate pairs — covers all non-BMP emoji (U+1F000–U+1FAFF, etc.)
     .replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '')
-    // Remove common BMP symbols/dingbats
-    .replace(/[☀-➿⌀-⏿︀-﻿]/g, '')
-    // Remove [CHART:X] tags
+    // BMP symbol blocks: dingbats, misc symbols, enclosed alphanumerics, etc.
+    .replace(/[⌀-➿⬀-⯿︀-﻿]/g, '')
+    // ── Remove non-speech tags ─────────────────────────────────────────────
     .replace(/\[CHART:[A-Z0-9.\-]+\]/gi, '')
-    // Remove markdown symbols
+    // ── Remove markdown ────────────────────────────────────────────────────
     .replace(/[*_~`#>|]/g, '')
-    // Remove bullet points
+    // ── Remove list markers ─────────────────────────────────────────────────
     .replace(/^\s*[-•·▪▸]\s+/gm, '')
     .replace(/^\s*\d+\.\s+/gm, '')
-    // Remove URLs
+    // ── Remove URLs ─────────────────────────────────────────────────────────
     .replace(/https?:\/\/\S+/g, '')
-    // Financial symbol replacements
-    .replace(/(\d[\d\s]*)\s*%/g, '$1 pourcent')
-    .replace(/\$\s*(\d)/g, '$1 dollars')
-    .replace(/€\s*(\d)/g, '$1 euros')
-    .replace(/\+(\d)/g, 'plus $1')
-    // Abbreviation replacements
-    .replace(/\bvs\.?\b/gi, 'versus')
-    .replace(/\bex\.\s+/gi, 'par exemple ')
-    .replace(/\betc\.\s*/gi, 'et cetera ')
-    .replace(/\bCA\$/g, 'dollars canadiens')
-    // Clean whitespace
+    // ── Strip repeated greeting ("Bonjour/Bonsoir/Bienvenue [Name]") ───────
+    // Keep the first greeting; strip duplicates by removing name-targeted greetings
+    // that appear mid-text (assistant often repeats the name unnecessarily in TTS)
+    .replace(/\b(Bonsoir|Bienvenue)\s+\w+[,!]?\s*/gi, '')
+    // ── Financial symbol → spoken word ──────────────────────────────────────
+    .replace(/(\d[\d\s,]*)\s*%/g,  '$1 pourcent')
+    .replace(/\$\s*(\d)/g,          '$1 dollars')
+    .replace(/€\s*(\d)/g,           '$1 euros')
+    .replace(/£\s*(\d)/g,           '$1 livres')
+    .replace(/\+(\d)/g,             'plus $1')
+    .replace(/\bCA\$/g,             'dollars canadiens')
+    // ── Abbreviation expansions ─────────────────────────────────────────────
+    .replace(/\bvs\.?\b/gi,         'versus')
+    .replace(/\bex\.\s+/gi,         'par exemple ')
+    .replace(/\betc\.\s*/gi,        'et cetera ')
+    .replace(/\bn°\s*/gi,           'numéro ')
+    // ── Clean whitespace ────────────────────────────────────────────────────
     .replace(/\s{2,}/g, ' ')
     .trim();
 }
@@ -192,9 +198,9 @@ const WAVE_DATA = Array.from({ length: WAVE_COUNT }, (_, i) => ({
 
 // ── Premium Voice Overlay ─────────────────────────────────────────────────────
 function VoiceOverlay({
-  isOpen, voiceState, interimTranscript, assistantText, onToggleMic, onClose,
+  isOpen, voiceState, isTranscribing, interimTranscript, assistantText, onToggleMic, onClose,
 }: {
-  isOpen: boolean; voiceState: VoiceState;
+  isOpen: boolean; voiceState: VoiceState; isTranscribing: boolean;
   interimTranscript: string; assistantText: string;
   onToggleMic: () => void; onClose: () => void;
 }) {
@@ -205,9 +211,9 @@ function VoiceOverlay({
   const speaking   = voiceState === 'speaking';
 
   const statusText =
-    listening  ? 'Je vous écoute…'     :
-    processing ? 'Réflexion…'          :
-    speaking   ? 'Je vous réponds…'    :
+    listening  ? 'Je vous écoute…'                           :
+    processing ? (isTranscribing ? 'Transcription…' : 'Réflexion…') :
+    speaking   ? 'Je vous réponds…'                          :
                  'Parlez pour commencer';
 
   // Only show last 180 chars of response in overlay preview
@@ -461,6 +467,7 @@ export default function ChatInterface() {
   // ── Voice state ─────────────────────────────────────────────────────────────
   const [voiceOverlayOpen, setVoiceOverlayOpen]   = useState(false);
   const [isListening, setIsListening]             = useState(false);
+  const [isTranscribing, setIsTranscribing]       = useState(false);
   const [isSpeaking, setIsSpeaking]               = useState(false);
   const [interimTranscript, setInterimTranscript] = useState('');
   const [voiceError, setVoiceError]               = useState('');
@@ -472,9 +479,10 @@ export default function ChatInterface() {
 
   // ── Derived state ───────────────────────────────────────────────────────────
   const voiceState: VoiceState =
-    isLoading   ? 'processing' :
-    isSpeaking  ? 'speaking'   :
-    isListening ? 'listening'  : 'idle';
+    isLoading      ? 'processing' :
+    isTranscribing ? 'processing' :
+    isSpeaking     ? 'speaking'   :
+    isListening    ? 'listening'  : 'idle';
 
   const lastAssistantMsg =
     [...messages].reverse().find((m) => m.role === 'assistant')?.content ?? '';
@@ -532,8 +540,9 @@ export default function ChatInterface() {
           sendMessageRef.current(text.trim());
         }
       };
-      vm.onListeningChange = setIsListening;
-      vm.onSpeakingChange  = setIsSpeaking;
+      vm.onListeningChange    = setIsListening;
+      vm.onSpeakingChange     = setIsSpeaking;
+      vm.onTranscribingChange = setIsTranscribing;
       vm.onError = (err) => {
         setVoiceError(err);
         setTimeout(() => setVoiceError(''), 6000);
@@ -619,14 +628,15 @@ export default function ChatInterface() {
 
       const shouldSpeak = voiceOverlayOpenRef.current && !!voiceManagerRef.current;
 
+      console.log('[Chat] shouldSpeak:', shouldSpeak);
+
       const onDelta = shouldSpeak
         ? (delta: string) => {
-            // Stop speaking after MAX_SPOKEN_SENTENCES sentences
             if (sentencesSpokenRef.current >= MAX_SPOKEN_SENTENCES) return;
             const cleaned = cleanTextForSpeech(delta);
+            console.log('[Chat] onDelta → cleaned:', JSON.stringify(cleaned.slice(0, 60)));
             if (cleaned.trim()) {
               voiceManagerRef.current?.speakStreaming(cleaned);
-              // Count sentence-ending punctuation to track progress
               sentencesSpokenRef.current += (cleaned.match(/[.!?]+/g) || []).length;
             }
           }
@@ -730,6 +740,7 @@ export default function ChatInterface() {
       <VoiceOverlay
         isOpen={voiceOverlayOpen}
         voiceState={voiceState}
+        isTranscribing={isTranscribing}
         interimTranscript={interimTranscript}
         assistantText={lastAssistantMsg}
         onToggleMic={toggleOverlayMic}
