@@ -37,9 +37,10 @@ export class VoiceManager {
   private readonly SILENCE_THR = 15;     // RMS threshold (0–255) — above=sound, below=silence
   private recordingStart       = 0;
 
-  // ── TTS: SpeechSynthesis (unchanged) ─────────────────────────────────────
+  // ── TTS: ElevenLabs (primary) + SpeechSynthesis (fallback) ──────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private synthesis:           any;
+  private currentAudio:        HTMLAudioElement | null = null; // active ElevenLabs playback
   private speakQueue:          string[] = [];
   private streamBuffer:        string = '';
   private isProcessingQueue:   boolean = false;
@@ -222,14 +223,62 @@ export class VoiceManager {
     }
   }
 
-  // ── TTS: speak a single utterance ────────────────────────────────────────
+  // ── TTS: speak a single utterance (ElevenLabs primary, SpeechSynthesis fallback) ──
   async speak(text: string): Promise<void> {
+    console.log('[VoiceManager] TTS ▶', text.slice(0, 60));
+    try {
+      const res = await fetch('/api/tts', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ text }),
+      });
+
+      if (!res.ok) throw new Error(`TTS HTTP ${res.status}`);
+
+      const blob  = await res.blob();
+      const url   = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      this.currentAudio = audio;
+
+      return new Promise((resolve) => {
+        audio.onplay = () => {
+          this._isSpeaking = true;
+          this.onSpeakingChange?.(true);
+        };
+        audio.onended = () => {
+          this._isSpeaking = false;
+          this.onSpeakingChange?.(false);
+          URL.revokeObjectURL(url);
+          this.currentAudio = null;
+          resolve();
+        };
+        audio.onerror = () => {
+          console.warn('[VoiceManager] ElevenLabs audio error — falling back to synthesis');
+          URL.revokeObjectURL(url);
+          this.currentAudio = null;
+          this.speakWithSynthesis(text).then(resolve);
+        };
+        audio.play().catch(() => {
+          console.warn('[VoiceManager] ElevenLabs play() rejected — falling back to synthesis');
+          URL.revokeObjectURL(url);
+          this.currentAudio = null;
+          this.speakWithSynthesis(text).then(resolve);
+        });
+      });
+    } catch (err) {
+      console.warn('[VoiceManager] ElevenLabs fetch failed — falling back to synthesis:', err);
+      return this.speakWithSynthesis(text);
+    }
+  }
+
+  // ── TTS: SpeechSynthesis fallback ────────────────────────────────────────
+  private speakWithSynthesis(text: string): Promise<void> {
     return new Promise((resolve) => {
-      const utterance    = new SpeechSynthesisUtterance(text);
-      utterance.lang     = SPEECH_LANG_CODES[this.currentLanguage];
-      utterance.rate     = 1.0;
-      utterance.pitch    = 1.0;
-      utterance.volume   = 1.0;
+      const utterance  = new SpeechSynthesisUtterance(text);
+      utterance.lang   = SPEECH_LANG_CODES[this.currentLanguage];
+      utterance.rate   = 1.0;
+      utterance.pitch  = 1.0;
+      utterance.volume = 1.0;
 
       const voice = this.getBestVoice();
       if (voice) utterance.voice = voice;
@@ -237,7 +286,6 @@ export class VoiceManager {
       utterance.onstart = () => {
         this._isSpeaking = true;
         this.onSpeakingChange?.(true);
-        console.log('[VoiceManager] TTS ▶', text.slice(0, 60));
       };
       utterance.onend = () => {
         this._isSpeaking = false;
@@ -245,7 +293,7 @@ export class VoiceManager {
         resolve();
       };
       utterance.onerror = (e) => {
-        console.warn('[VoiceManager] TTS error:', e.error, '| text:', text.slice(0, 40));
+        console.warn('[VoiceManager] SpeechSynthesis error:', e.error);
         this._isSpeaking = false;
         this.onSpeakingChange?.(false);
         resolve();
@@ -262,6 +310,12 @@ export class VoiceManager {
     this.speakQueue        = [];
     this.streamBuffer      = '';
     this.isProcessingQueue = false;
+    // Stop ElevenLabs audio if playing
+    if (this.currentAudio) {
+      this.currentAudio.pause();
+      this.currentAudio = null;
+    }
+    // Stop SpeechSynthesis fallback if active
     this.synthesis.cancel();
     this._isSpeaking = false;
     this.onSpeakingChange?.(false);
