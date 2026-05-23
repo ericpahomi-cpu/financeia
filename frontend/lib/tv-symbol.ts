@@ -111,8 +111,9 @@ export function toTVSymbol(raw: string, type?: 'stock' | 'crypto'): string {
   // ── 6. Known crypto ticker (bare, without suffix) ─────────────────────────
   if (CRYPTO_TV[lower]) return CRYPTO_TV[lower];
 
-  // ── 7. Fallback: assume NASDAQ ────────────────────────────────────────────
-  return `NASDAQ:${upper}`;
+  // ── 7. Fallback: bare ticker — TradingView auto-resolves the correct exchange
+  //    (NYSE:PII, AMEX:X, etc.) without needing us to guess
+  return upper;
 }
 
 function cryptoToTV(lower: string, upper: string): string {

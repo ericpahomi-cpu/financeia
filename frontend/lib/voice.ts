@@ -31,11 +31,13 @@ export class VoiceManager {
   private analyser:            any = null;  // AnalyserNode
   private stream:              MediaStream | null = null;
   private chunks:              Blob[] = [];
-  private silenceInterval:     ReturnType<typeof setInterval> | null = null;
+  private silenceInterval:       ReturnType<typeof setInterval> | null = null;
   private readonly SILENCE_MS  = 2500;   // stop recording after 2.5s of silence
   private readonly MIN_REC_MS  = 800;    // minimum before silence detection engages
   private readonly SILENCE_THR = 15;     // RMS threshold (0–255) — above=sound, below=silence
   private recordingStart       = 0;
+  private _pausedForSpeaking   = false;  // true when mic is paused while agent speaks
+  private _discardNextAudio    = false;  // skip next processAudio call (speaker bleed guard)
 
   // ── TTS: ElevenLabs (primary) + SpeechSynthesis (fallback) ──────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -149,16 +151,54 @@ export class VoiceManager {
           this.stopListening(); // triggers processAudio via onstop
         }
       } else {
-        // Sound detected — reset silence counter
+        // Sound detected — reset silence counter only (no barge-in: mic is off while agent speaks)
         silenceStart = null;
-        // Barge-in: user speaks while agent is still talking → interrupt agent
-        if (this._isSpeaking) this.stopSpeaking();
       }
     }, 80);
   }
 
+  // ── STT: pause mic while agent speaks (prevents speaker bleed) ────────────
+  private pauseRecording(): void {
+    if (!this._isListening || this._pausedForSpeaking) return;
+    this._pausedForSpeaking  = true;
+    this._discardNextAudio   = true;  // discard whatever was recorded during warmup
+    // Stop silence detection
+    if (this.silenceInterval) {
+      clearInterval(this.silenceInterval);
+      this.silenceInterval = null;
+    }
+    // Stop MediaRecorder — onstop fires processAudio, which will discard due to flag
+    if (this.mediaRecorder?.state === 'recording') {
+      this.mediaRecorder.stop();
+    }
+    console.log('[VoiceManager] Mic paused — agent speaking');
+  }
+
+  // ── STT: resume mic after agent finishes speaking ─────────────────────────
+  private resumeRecording(): void {
+    if (!this._pausedForSpeaking || !this.stream || !this.analyser) return;
+    this._pausedForSpeaking = false;
+
+    const mimeType =
+      MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' :
+      MediaRecorder.isTypeSupported('audio/webm')             ? 'audio/webm'              :
+                                                                'audio/mp4';
+    this.chunks        = [];
+    this.mediaRecorder = new MediaRecorder(this.stream, { mimeType });
+    this.mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) this.chunks.push(e.data);
+    };
+    this.mediaRecorder.onstop = () => void this.processAudio();
+    this.mediaRecorder.start(100);
+
+    this.recordingStart = Date.now(); // reset so MIN_REC_MS guard works correctly
+    this.startSilenceDetection();
+    console.log('[VoiceManager] Mic resumed — agent finished speaking');
+  }
+
   // ── STT: stop recording ───────────────────────────────────────────────────
   stopListening(): void {
+    this._pausedForSpeaking = false; // cancel any pending auto-resume
     if (!this._isListening) return;
     this._isListening = false;
     this.onListeningChange?.(false);
@@ -179,6 +219,13 @@ export class VoiceManager {
 
   // ── STT: send to Groq Whisper ─────────────────────────────────────────────
   private async processAudio(): Promise<void> {
+    // Discard audio captured while agent was speaking (speaker bleed guard)
+    if (this._discardNextAudio) {
+      this._discardNextAudio = false;
+      this.chunks = [];
+      console.log('[VoiceManager] Discarding recording — agent was speaking');
+      return;
+    }
     if (this.chunks.length === 0) return;
 
     const mimeType = this.mediaRecorder?.mimeType ?? 'audio/webm';
@@ -245,12 +292,14 @@ export class VoiceManager {
         audio.onplay = () => {
           this._isSpeaking = true;
           this.onSpeakingChange?.(true);
+          this.pauseRecording(); // stop mic while agent speaks
         };
         audio.onended = () => {
           this._isSpeaking = false;
           this.onSpeakingChange?.(false);
           URL.revokeObjectURL(url);
           this.currentAudio = null;
+          this.resumeRecording(); // restart mic only after speech finishes
           resolve();
         };
         audio.onerror = () => {
@@ -287,16 +336,19 @@ export class VoiceManager {
       utterance.onstart = () => {
         this._isSpeaking = true;
         this.onSpeakingChange?.(true);
+        this.pauseRecording(); // stop mic while agent speaks
       };
       utterance.onend = () => {
         this._isSpeaking = false;
         this.onSpeakingChange?.(false);
+        this.resumeRecording(); // restart mic after speech
         resolve();
       };
       utterance.onerror = (e) => {
         console.warn('[VoiceManager] SpeechSynthesis error:', e.error);
         this._isSpeaking = false;
         this.onSpeakingChange?.(false);
+        this.resumeRecording();
         resolve();
       };
 

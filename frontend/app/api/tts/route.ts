@@ -6,6 +6,7 @@ const VOICE_ID = 'jfEwztGDkpbpy89xeku6';
 
 export async function POST(req: NextRequest) {
   const apiKey = process.env.ELEVENLABS_API_KEY;
+  console.log('ELEVENLABS_KEY present:', !!apiKey);
   if (!apiKey) {
     return NextResponse.json({ error: 'ELEVENLABS_API_KEY not configured' }, { status: 500 });
   }
