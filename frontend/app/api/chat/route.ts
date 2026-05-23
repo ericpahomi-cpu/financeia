@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
         .select('role, content')
         .eq('client_id', user.id)
         .not('role', 'is', null)
-        .order('created_at', { ascending: true })
+        .order('created_at', { ascending: false })  // newest first → then reversed below
         .limit(12),
       supabaseAdmin
         .from('user_preferences')
@@ -81,7 +81,8 @@ export async function POST(req: NextRequest) {
       console.error('[chat] history fetch error:', historyResult.error.message);
     }
 
-    const history = (historyResult.data ?? []).filter((m) => m.role && m.content);
+    // Reverse so messages are in chronological order (oldest → newest)
+    const history = (historyResult.data ?? []).filter((m) => m.role && m.content).reverse();
     const prefs   = prefsResult.data as {
       language?: string; level?: string; risk_profile?: string; currency?: string;
     } | null;

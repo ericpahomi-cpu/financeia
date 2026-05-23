@@ -225,6 +225,7 @@ export class VoiceManager {
 
   // ── TTS: speak a single utterance (ElevenLabs primary, SpeechSynthesis fallback) ──
   async speak(text: string): Promise<void> {
+    console.log('[TTS] Using ElevenLabs');
     console.log('[VoiceManager] TTS ▶', text.slice(0, 60));
     try {
       const res = await fetch('/api/tts', {
