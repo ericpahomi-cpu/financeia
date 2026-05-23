@@ -670,10 +670,23 @@ export default function ChatInterface() {
       const vm = new VoiceManager(lang);
       vm.onTranscript = (text, isFinal) => {
         setInterimTranscript(isFinal ? '' : text);
-        if (isFinal && text.trim()) {
+        if (isFinal) {
+          const trimmed = text.trim();
+          // Guard: ignore empty or near-empty transcripts (noise, breath, mic blip)
+          if (trimmed.length < 3) {
+            console.log('[Voice] Transcript too short, ignoring:', JSON.stringify(trimmed));
+            setInterimTranscript('');
+            // Silently restart listening if overlay is still open
+            if (voiceOverlayOpenRef.current) {
+              setTimeout(() => {
+                if (voiceOverlayOpenRef.current) vm.startListening();
+              }, 300);
+            }
+            return;
+          }
           vm.stopListening();
           setInterimTranscript('');
-          sendMessageRef.current(text.trim());
+          sendMessageRef.current(trimmed);
         }
       };
       vm.onListeningChange    = setIsListening;
